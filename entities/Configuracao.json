@@ -1,0 +1,14 @@
+{
+  "properties": {
+    "diasTrabalhados": {
+      "default": "1,2,3,4,5",
+      "description": "Dias da semana trabalhados (1=Seg...7=Dom), armazenado como string separada por v\u00edrgulas",
+      "type": "string"
+    }
+  },
+  "required": [
+    "diasTrabalhados"
+  ],
+  "type": "object",
+  "name": "Configuracao"
+}
