@@ -10,6 +10,7 @@ import {
   BLOCO_PIX,
   selecionarTemplate,
 } from "../config/messages.config";
+import { formatarMoedaSimples, formatarDataCurta } from "../lib/format.utils";
 
 /**
  * Gera um link wa.me para abrir o WhatsApp com mensagem pré-preenchida.
@@ -84,20 +85,4 @@ export function gerarMensagem(
     .trim();
 
   return mensagem;
-}
-
-// --- Helpers internos ---
-
-/** Formata valor para moeda brasileira simples (sem "R$" para usar dentro dos templates) */
-function formatarMoedaSimples(valor: number): string {
-  return valor.toLocaleString("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-/** Formata data ISO (YYYY-MM-DD) para DD/MM */
-function formatarDataCurta(iso: string): string {
-  const [, mes, dia] = iso.split("-");
-  return `${dia}/${mes}`;
 }
