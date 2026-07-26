@@ -1,371 +1,283 @@
-# Plano de Implementação — Sistema de Cobranças
+# Plano de Implementação — Sistema de Cobranças (v2.0)
 
 **Base:** PRD v2.0
 **Plataforma:** Base44
 **Estratégia:** Desenvolvimento incremental, módulos independentes com dependências explícitas
+**Substitui:** v1.0
 
 ---
 
-## Visão Geral
+## 0. Changelog v2.0
 
-15 módulos em 8 fases. Cada módulo é independente, testável isoladamente, e só avança após validar seus critérios de conclusão. A ordem minimiza retrabalho — cada módulo só depende de módulos já concluídos.
-
-```
-Fase 1: Fundação          M1 → M2
-Fase 2: Regras de Negócio M3 → M5
-Fase 3: Serviços          M4
-Fase 4: Hooks            M6
-Fase 5: Componentes       M7 → M8
-Fase 6: Páginas           M9 → M10 → M11 → M12 → M13
-Fase 7: Integração        M14
-Fase 8: Validação         M15
-```
+| # | Problema original | Solução adotada | Justificativa técnica | Impacto arquitetura | Impacto cronograma | Compatível PRD v2.0 |
+|---|---|---|---|---|---|---|
+| 1 | Dependência circular M3↔M5: M3 usa tipos de M5 mas M5 depende de M3 | M5 antes de M3. M5 não tem dependências. M3 depende de M5. | Elimina referência forward. Tipos devem existir antes das funções que os usam. | M3 depende de M5 em vez de nenhum. M5 perde dependência de M3. | M5 e M1 paralelos no Sprint 1. M3 no Sprint 2. | ✅ — PRD não define ordem de construção |
+| 2 | M3 com 9 arquivos misturando utils e domain em um checkpoint | M3 dividido em M3a (utils: math, date, format, validation) e M3b (domain: billing, parcel, status, overdue, charge) | Utils são triviais e independentes. Domain é complexo e depende de utils. Separar permite concluir M3a e iniciar M3b/M2 em paralelo. | Dois módulos em vez de um. M3b depende de M3a. | M3a no Sprint 2, M3b no Sprint 3 paralelo a M2. | ✅ — estrutura de diretórios do PRD já separa lib/ e domain/ |
+| 3 | M4 (services) é wrapper 1:1 do SDK sem abstração real | M4 removido. Hooks chamam o SDK do Base44 diretamente. whatsapp.service.ts e clipboard.service.ts movidos para M5. | Em Base44, o SDK já é a API (`import { EntityName } from '@/api/entities'`). Uma camada que apenas repassa chamadas adiciona um arquivo por entidade sem benefício. A única exceção — criarCobranca — já é uma backend function. | Remoção de services/api.service.ts. Hooks dependem de M1+M3+M5 em vez de M4. whatsapp.service e clipboard.service movidos para M5. | Sprint 3 (M4) eliminado. Hooks começam 1 sprint mais cedo. | ✅ — PRD define services/ como camada, mas não exige wrapper do SDK. A arquitetura modular é preservada com hooks encapsulando acesso a dados. |
+| 4 | M6 com 7 hooks de complexidade desigual em um checkpoint | M6 dividido em M6a (useClients, useProducts, useCharges, useConfig) e M6b (useDashboard, useParcelActions) | M6a é CRUD simples que desbloqueia M11, M12, M13. M6b é complexo e só desbloqueia M9. Separar permite paralelizar páginas simples antes do Dashboard. | Dois módulos. M6b depende de M6a. | M6a no Sprint 4. M6b no Sprint 5. M11/M12/M13 no Sprint 5 em paralelo. | ✅ — PRD não define granularidade de hooks |
+| 5 | useBatchSelect em M6 mas só usado no Dashboard (M9) | Movido para M9. O hook é construído junto com o componente que o usa. | O hook precisa da interface do ChargeCard (círculo de seleção). Construir antes do componente gera retrabalho na API do hook. | M6b reduzido para 2 hooks. M9 ganha 1 hook interno. | Sem impacto (era Sprint 4, agora Sprint 6 — mesmo momento do Dashboard). | ✅ |
+| 6 | M8 mistura componentes complexos (ChargeCard) com triviais (BatchBar, OnboardingGuide) | M8 dividido em M8a (core: ChargeCard, autocompletes, PaymentSelector, ParcelPreview) e M8b (auxiliares: BatchBar). OnboardingGuide movido para M14. | M8a bloqueia M9 e M10. M8b (BatchBar) é trivial e pode ser feito junto com M9. OnboardingGuide depende de detecção de estado vazio que só existe na integração (M14). | Três mudanças: M8a com 5 componentes, M8b com 1 (BatchBar) dentro de M9, OnboardingGuide em M14. | M8a no Sprint 5. BatchBar e OnboardingGuide adiados para Sprint 6/8. | ✅ |
+| 7 | M10 com 20 critérios em um único módulo | M10 dividido em M10a (passos 1+2: seleção), M10b (passos 3+4: vencimento+sucesso), M10c (cadastro inteligente, pós-MVP) | M10a e M10b são sequenciais mas com checkpoints separados. M10c é otimização que não bloqueia o MVP. | Três módulos. M10b depende de M10a. M10c depende de M14. | M10a no Sprint 6, M10b no Sprint 7, M10c no Sprint 10 (opcional). | ✅ — PRD define cadastro inteligente como feature, não como bloqueador do MVP. Funcional sem ele. |
+| 8 | M2 (createCobranca) e M3 (domain) duplicam lógica de parcelas sem alinhamento | M3a (utils) concluído antes de M2. M2 reimplementa a lógica independentemente (duplicação consciente). Ambos validados contra os mesmos testes. | Backend functions em Base44 são isoladas — não importam de src/. Duplicar é inevitável. O risco de divergência é mitigado por testes compartilhados. | M2 depende de M3a. Adicionado critério de não-avanço: se M3a muda, M2 deve ser revalidado. | M3a no Sprint 2, M2 no Sprint 3. | ✅ — PRD exige backend function para criação atômica |
+| 9 | Edição de cobrança "regenera parcelas" sem transação — risco de perder parcelas | M2b (editarCobranca backend function) adicionado. Estratégia: criar novas parcelas primeiro, depois deletar as antigas, depois atualizar a cobrança. | Sem transação ACID, criar-antes-de-deletar é mais seguro que deletar-antes-de-criar. Se criar falha, as antigas continuam existindo. | Novo módulo M2b no Sprint 3. | +0.5 dia no Sprint 3. | ✅ — PRD exige edição de cobrança com regeneração de parcelas |
+| 10 | Dados de teste do M1 com datas absolutas ficam desatualizados entre sprints | M1 inclui `seed-test-data.ts` que cria dados com datas calculadas dinamicamente (relative a hoje). Reutilizável em M9, M10, M14, M15. | Datas absolutas tornam testes não reprodutíveis. Datas relativas garantem que "vence hoje" sempre vence hoje. | M1 ganha 1 arquivo de seed. Cada fase de teste chama o seed antes. | +0.5 dia no Sprint 1. | ✅ |
+| 11 | M2 não especifica role do SDK (user-scoped vs asServiceRole) | M2 usa `base44.entities` (user-scoped) para criar cobranças e parcelas. `base44.asServiceRole` apenas para incrementar vezesUsado se RLS bloquear. | RLS está habilitado. O update cross-entity (incrementar vezesUsado do ProdutoServico a partir da criação de Cobranca) pode exigir service role. | M2 especifica explicitamente qual role usar em cada operação. | Sem impacto. | ✅ — PRD exige RLS |
+| 12 | M7 no Sprint 4 mas depende apenas de M5+M3a (Sprint 1-2) | M7 movido para Sprint 2, em paralelo com M3a. | M7 usa apenas tipos (M5) e format.utils (M3a). Pode começar assim que M5 está pronto. | M7 no Sprint 2 em vez de Sprint 4. | M7 concluído 2 sprints mais cedo. Desbloqueia M8a e M11/M12 mais cedo. | ✅ |
+| 13 | M11/M12/M13 no Sprint 7 mas dependem de M6a+M7 (Sprint 2-4) | M11/M12/M13 movidos para Sprint 5, em paralelo com M8a e M6b. | M11 e M12 dependem apenas de M6a (hooks básicos) e M7 (componentes base), não de M8a (compostos). M13 é trivial (1-2h). | Sprint 5 agora tem 4 módulos paralelos. | Páginas simples concluídas 2 sprints mais cedo. | ✅ |
+| 14 | M9 não define comportamento do clique em "Próximos vencimentos" | Adicionado critério: clique abre overlay/modal listando parcelas daquele dia. Não navega para outra página. | Sem definição, dois devs implementam de forma diferente (overlay vs navegação). | Novo critério em M9. | Sem impacto. | ✅ — PRD define "linhas clicáveis" mas não o comportamento |
+| 15 | M10 não define tratamento de erro do backend function | Adicionado critério: se backend retorna erro, wizard permanece no passo atual com toast de erro. Dados não são perdidos. | Sem definição, o desenvolvedor pode limpar o wizard ou redirecionar para o Dashboard. | Novo critério em M10b. | Sem impacto. | ✅ |
+| 16 | M14 não detalha fluxo de edição tecnicamente | Adicionado: M10 recebe prop editMode=true e cobrancaId. Passo 1 como somente leitura. Botão diz "Salvar alterações". Chama editarCobranca (M2b), não createCobranca. | Sem definição, a edição seria implementada de forma diferente do fluxo de criação. | M14 detalha a integração da edição. | Sem impacto. | ✅ — PRD exige edição de cobrança |
+| 17 | M15 não testa cadastro inteligente end-to-end | Adicionado cenário 9: criar 3 cobranças para mesmo cliente com mesmo PIX, abrir Nova Cobrança, verificar pré-preenchimento. | Sem teste E2E, o cadastro inteligente pode funcionar em unit tests mas falhar na integração. | Novo cenário em M15. | Sem impacto (Sprint 10). | ✅ |
 
 ---
 
-## Fase 1 — Fundação de Dados
+## 1. Visão Geral
 
-### Módulo M1: Entities (5 entidades)
+21 módulos em 10 fases. Cada módulo é independente, testável isoladamente, e só avança após validar seus critérios de conclusão. A ordem minimiza retrabalho — cada módulo só depende de módulos já concluídos.
 
-**Objetivo:** Criar as 5 entities no Base44 com schemas exatos do PRD v2.0 seção 6.
+```
+Sprint 1: M1 (entities) + M5 (types/config/event-bus/services)
+Sprint 2: M3a (utils) + M7 (componentes base)
+Sprint 3: M2 (createCobranca) + M2b (editarCobranca) + M3b (domain)
+Sprint 4: M6a (hooks básicos) + M13 (Settings)
+Sprint 5: M6b (hooks complexos) + M8a (compostos core) + M11 (Clientes) + M12 (Produtos)
+Sprint 6: M9 (Dashboard) + M10a (Nova Cobrança passos 1+2)
+Sprint 7: M10b (Nova Cobrança passos 3+4)
+Sprint 8: M14 (integração, onboarding, edição)
+Sprint 9: M15 (validação E2E)
+Sprint 10: M10c (cadastro inteligente — opcional/pós-MVP)
+```
+
+**MVP funcional ao final do Sprint 9 (~16 dias úteis).** Sprint 10 é melhoria opcional.
+
+### Diagrama de dependências
+
+```
+Sprint 1:  M1 ─────────┬───────────────────────────────────────────────
+                     │
+         M5 ─────────┼──────┬──────────────────────────────────────────
+                     │      │
+Sprint 2:  M3a ──────┼──────┤
+                     │      │
+         M7 ─────────┼──────┼──────┬──────────────────────────────────
+                     │      │      │
+Sprint 3:  M2 ───────┘      │      │
+         M2b ───────────────┘      │
+         M3b ──────────────────────┤
+                                   │
+Sprint 4:  M6a ───────────────────┤
+         M13 ─────────────────────┤
+                                   │
+Sprint 5:  M6b ───────────────────┤
+         M8a ─────────────────────┤
+         M11 ─────────────────────┤
+         M12 ─────────────────────┤
+                                   │
+Sprint 6:  M9 ────────────────────┤
+         M10a ────────────────────┤
+                                   │
+Sprint 7:  M10b ──────────────────┤
+                                   │
+Sprint 8:  M14 ────────────────────┤
+                                   │
+Sprint 9:  M15 ────────────────────┘
+
+Sprint 10: M10c (opcional)
+```
+
+### Matriz de dependências
+
+| Módulo | Depende de | Bloqueia | Sprint |
+|---|---|---|---|
+| M1 | — | M2, M2b, M6a | 1 |
+| M5 | — | M3a, M7, M6a | 1 |
+| M3a | M5 | M3b, M2, M2b, M7, M6a | 2 |
+| M7 | M5, M3a (format.utils apenas) | M8a, M11, M12, M13 | 2 |
+| M2 | M1, M3a | M10a | 3 |
+| M2b | M1, M3a | M14 | 3 |
+| M3b | M3a, M5 | M6b, M8a, M10 | 3 |
+| M6a | M1, M3a, M5 | M6b, M11, M12, M13, M10a | 4 |
+| M13 | M6a, M7 | M14 | 4 |
+| M6b | M6a, M3b | M9 | 5 |
+| M8a | M7, M3b, M5 | M9, M10a | 5 |
+| M11 | M6a, M7 | M14 | 5 |
+| M12 | M6a, M7 | M14 | 5 |
+| M9 | M6b, M8a, M7 | M14 | 6 |
+| M10a | M8a, M6a, M2 | M10b | 6 |
+| M10b | M10a | M14 | 7 |
+| M14 | M9, M10b, M11, M12, M13, M2b | M15, M10c | 8 |
+| M15 | M14 | — | 9 |
+| M10c | M14 | — | 10 (opcional) |
+
+---
+
+## Sprint 1 — Fundação
+
+### Módulo M1: Entities + Seed de Teste
+
+**Objetivo:** Criar as 5 entities no Base44 com schemas exatos do PRD v2.0 seção 6, e preparar dados de teste com datas relativas.
 
 **Tarefas:**
-1. Criar entity `Cliente` (nome, telefone, observacoes, ativo)
-2. Criar entity `ProdutoServico` (nome, valorPadrao, vezesUsado)
-3. Criar entity `Cobranca` (clienteId, produtoServicoId, nomeProdutoServico, valor, formaPagamento, quantidadeParcelas, primeiroVencimento, diaVencimentoFixo, pixUtilizado, observacoes)
-4. Criar entity `Parcela` (cobrancaId, clienteId, numeroParcela, valor, valorPago, dataVencimento, status, dataPagamento, dataCobrancaEnviada, arquivada)
-5. Criar entity `Configuracao` (diasTrabalhados)
+1. Criar entity `Cliente` via `manage_entity_schemas` (action=create)
+   - Schema: `{ nome: { type: "string" }, telefone: { type: "string" }, observacoes: { type: "string" }, ativo: { type: "boolean", default: true } }`
+2. Criar entity `ProdutoServico`
+   - Schema: `{ nome: { type: "string" }, valorPadrao: { type: "number" }, vezesUsado: { type: "number", default: 0 } }`
+3. Criar entity `Cobranca`
+   - Schema: `{ clienteId: { type: "string", ref: "Cliente" }, produtoServicoId: { type: "string", ref: "ProdutoServico" }, nomeProdutoServico: { type: "string" }, valor: { type: "number" }, formaPagamento: { type: "string", enum: ["pix", "dinheiro", "cartao_credito", "cartao_debito", "transferencia"] }, quantidadeParcelas: { type: "number" }, primeiroVencimento: { type: "string", format: "date" }, diaVencimentoFixo: { type: "number", enum: [5, 10, 15, 20, 25, 30] }, pixUtilizado: { type: "string" }, observacoes: { type: "string" } }`
+4. Criar entity `Parcela`
+   - Schema: `{ cobrancaId: { type: "string", ref: "Cobranca" }, clienteId: { type: "string", ref: "Cliente" }, numeroParcela: { type: "number" }, valor: { type: "number" }, valorPago: { type: "number" }, dataVencimento: { type: "string", format: "date" }, status: { type: "string", enum: ["pendente", "cobrado", "pago", "pago_parcial", "arquivado"], default: "pendente" }, dataPagamento: { type: "string", format: "date" }, dataCobrancaEnviada: { type: "string", format: "date" }, arquivada: { type: "boolean", default: false } }`
+5. Criar entity `Configuracao`
+   - Schema: `{ diasTrabalhados: { type: "string" } }` — armazenado como string "1,2,3,4,5" (ver critério de teste abaixo)
 6. Habilitar RLS em todas as entities
+7. Escrever `lib/seed-test-data.ts` — função que cria dados de teste com datas relativas a hoje
+
+**seed-test-data.ts deve criar:**
+- 5 clientes: Maria Silva (ativo), João Pereira (ativo), Ana Costa (ativo), Carlos Santos (ativo), Fernanda Souza (inativo)
+- 3 produtos: Manutenção Mensal (R$ 200, vezesUsado=8), Consultoria (R$ 150, vezesUsado=5), Hospedagem (R$ 80, vezesUsado=3)
+- Cobranças e parcelas cobrindo: vence hoje, vence amanhã, atrasada 2 dias, atrasada 10 dias, paga, pago parcial (R$ 100 de R$ 200), arquivada, à vista, parcelada 3x, parcelada 10x, venda avulsa (produtoServicoId=null), PIX e dinheiro
+- 1 Configuracao com diasTrabalhados = "1,2,3,4,5"
+- Todas as datas calculadas com `const hoje = new Date()` em timezone America/Sao_Paulo
 
 **Dependências:** Nenhuma
 
 **Critérios de conclusão:**
-- [ ] As 5 entities existem no Base44 com os campos e tipos exatos
-- [ ] Os campos obrigatórios estão marcados como required
-- [ ] Os campos com default estão configurados (ativo=true, vezesUsado=0, status=pendente, arquivada=false)
+- [ ] As 5 entities existem via `manage_entity_schemas` action=list
+- [ ] Campos obrigatórios marcados como required
+- [ ] Defaults configurados (ativo=true, vezesUsado=0, status=pendente, arquivada=false)
 - [ ] RLS habilitado em todas as entities
-- [ ] `formaPagamento` aceita apenas os 5 valores do enum (sem boleto)
-- [ ] `diaVencimentoFixo` aceita apenas [5, 10, 15, 20, 25, 30]
-- [ ] `status` da parcela aceita apenas [pendente, cobrado, pago, pago_parcial, arquivado]
-
-**Dados de teste (mínimo):**
-- 5 clientes (3 ativos, 1 inativo, 1 sem cobranças)
-- 3 produtos (com e sem valorPadrao)
-- 5 cobranças variadas (à vista, parcelada 3x, parcelada 10x, venda avulsa, PIX e dinheiro)
-- Parcelas geradas cobrindo: vence hoje, vence amanhã, atrasada 2 dias, atrasada 10 dias, paga, pago parcial, arquivada
-- 1 registro de Configuracao (diasTrabalhados = [1,2,3,4,5])
+- [ ] `formaPagamento` enum tem exatamente 5 valores (pix, dinheiro, cartao_credito, cartao_debito, transferencia — sem boleto)
+- [ ] `diaVencimentoFixo` enum tem exatamente [5, 10, 15, 20, 25, 30]
+- [ ] `status` enum tem exatamente [pendente, cobrado, pago, pago_parcial, arquivado]
+- [ ] seed-test-data.ts executa sem erro e cria todos os registros
+- [ ] Dados do seed têm datas relativas a hoje (não hardcoded)
 
 **Testes antes de avançar:**
-1. Criar registros via `create_entity_records` e ler via `read_entities` — confirmar que os campos gravam e recuperam corretamente
-2. Tentar criar cobrança com formaPagamento = "boleto" — deve falhar
-3. Tentar criar parcela com status = "invalido" — deve falhar
-4. Confirmar que RLS impede leitura cross-user (se possível testar com 2 usuários)
+1. Criar registros via `create_entity_records` e ler via `read_entities` — confirmar campos gravam e recuperam corretamente
+2. Tentar criar cobrança com formaPagamento = "boleto" — se Base44 rejeitar, confirmar erro. Se não rejeitar, registrar como limitação conhecida (validação em código no M2 e M3).
+3. Tentar criar parcela com status = "invalido" — mesmo procedimento
+4. Criar Configuracao com diasTrabalhados = [1,2,3,4,5] — se persistir como array, manter. Se não persistir, armazenar como string "1,2,3,4,5" e converter no frontend.
+5. Executar seed-test-data.ts → confirmar que parcelas "de hoje" têm dataVencimento = hoje
+6. Confirmar RLS: ler entidades como usuário não-admin — deve ver apenas próprios registros
 
 ---
 
-### Módulo M2: Backend Function — createCobranca
+### Módulo M5: Types, Config, EventBus e Services Leves
 
-**Objetivo:** Deployar a backend function que cria cobrança + parcelas atomicamente com compensação em falha.
+**Objetivo:** Definir todas as tipagens TypeScript, configurações, EventBus, e serviços que não são wrappers do SDK (WhatsApp e clipboard).
 
 **Tarefas:**
-1. Escrever `functions/createCobranca.ts` com a seguinte lógica:
-   - Receber payload: { clienteId, produtoServicoId, nomeProdutoServico, valor, formaPagamento, quantidadeParcelas, primeiroVencimento, diaVencimentoFixo, pixUtilizado, observacoes }
-   - Validar todos os campos (regras do PRD 7.1: valor >0, parcelas 1-60, PIX obrigatório se forma=PIX, nome ≥3 chars)
-   - Criar registro de Cobranca
-   - Calcular parcelas (algoritmo do PRD 7.1 — arredondamento e meses curtos)
-   - Criar N registros de Parcela em lote
-   - Se produtoServicoId != null: incrementar vezesUsado do produto
-   - Se qualquer passo falha: deletar cobranca criada + parcelas criadas (compensação)
-   - Retornar { cobrancaId, parcelas: [...], sucesso: true }
-2. Deploy via `deploy_backend_function`
-3. Testar via `test_backend_function`
 
-**Dependências:** M1 (entities devem existir)
+**5a. Tipos TypeScript**
+- `types/client.types.ts` — Cliente, ClienteInput, ClienteUpdate
+- `types/product.types.ts` — ProdutoServico, ProdutoInput
+- `types/charge.types.ts` — Cobranca, CobrancaInput, CobrancaUpdate, FormaPagamento (union type: "pix" | "dinheiro" | "cartao_credito" | "cartao_debito" | "transferencia")
+- `types/parcel.types.ts` — Parcela, ParcelaInput, ParcelaStatus (union: "pendente" | "cobrado" | "pago" | "pago_parcial" | "arquivado"), AcaoStatus, EstadoAnterior
+- `types/common.types.ts` — DiasVencimento (5|10|15|20|25|30), EventTypes, ResultadoOperacao
 
-**Critérios de conclusão:**
-- [ ] Function deployed e acessível via HTTP
-- [ ] Criar cobrança à vista → retorna 1 parcela com valor = valor total
-- [ ] Criar cobrança 3x R$100 → retorna 3 parcelas (33.33, 33.33, 33.34)
-- [ ] Criar cobrança 3x R$100 → soma das parcelas = exatamente 100.00
-- [ ] Criar cobrança com diaVencimentoFixo=30, primeiroVencimento=2026-01-30, 3 parcelas → parcela 2 vence 28/02 (fevereiro não bissexto)
-- [ ] Criar cobrança com diaVencimentoFixo=30, primeiroVencimento=2024-01-30, 3 parcelas → parcela 2 vence 29/02 (2024 bissexto)
-- [ ] Criar cobrança com formaPagamento=pix, pixUtilizado vazio → retorna erro de validação
-- [ ] Criar cobrança com valor=0 → retorna erro de validação
-- [ ] Criar cobrança com quantidadeParcelas=61 → retorna erro de validação
-- [ ] Criar cobrança com produtoServicoId → vezesUsado do produto incrementa
-- [ ] Simular falha no meio da criação de parcelas → cobranca é deletada (compensação)
+**5b. Configurações**
+- `config/days.config.ts` — `export const DIAS_VENCIMENTO = [5, 10, 15, 20, 25, 30] as const`
+- `config/messages.config.ts` — 3 templates de mensagem WhatsApp (hoje, atrasada, pago parcial) com placeholders [Nome], [Valor], [Produto], [Data], [PIX], [SaldoDevedor]
+- `config/app.config.ts` — MAX_PARCELAS=60, MAX_VALOR=999999.99, UNDO_TIMEOUT=5000, TOAST_DURATION=5000
 
-**Testes antes de avançar:**
-1. Chamar function com payload completo e válido → confirmar cobranca + parcelas criadas
-2. Chamar function com payload inválido (PIX sem chave) → confirmar erro e nenhum registro criado
-3. Verificar que vezesUsado foi incrementado após criar cobrança com produto
-4. Verificar que a soma das parcelas bate com o valor total em pelo menos 5 cenários diferentes (à vista, 2x, 3x, 7x, 12x)
-5. Verificar fevereiro: criar cobrança com dia 30, 3 parcelas a partir de janeiro → parcela de fevereiro tem dia 28 ou 29
+**5c. Infraestrutura**
+- `lib/event-bus.ts` — EventBus com métodos emit, on, off, once. Tipagem de eventos via EventTypes.
 
----
+**5d. Services leves (não-wrappers do SDK)**
+- `services/whatsapp.service.ts` — `gerarLinkWhatsApp(telefone, mensagem): string` e `gerarMensagem(parcela, cobranca, cliente): string`. Seleção de template: pago_parcial → template parcial; atrasada (dataVencimento < hoje) → template atrasada; senão → template hoje. Substituição de placeholders. Linhas de PIX apenas se formaPagamento=pix E pixUtilizado != null.
+- `services/clipboard.service.ts` — `copiar(texto: string): Promise<boolean>` com fallback para execCommand.
 
-## Fase 2 — Regras de Negócio (Pure Functions)
-
-### Módulo M3: Domain Logic
-
-**Objetivo:** Implementar todas as regras de negócio como funções puras, sem dependência de framework.
-
-**Tarefas (cada arquivo é independente):**
-
-**3a. `lib/math.utils.ts`**
-- `dividirValor(valor: number, parcelas: number): { valorBase: number, valorUltima: number }`
-- Usa `Math.floor((valor/parcelas) * 100) / 100` para valorBase
-- valorUltima = `valor - (valorBase * (parcelas - 1))`
-
-**3b. `lib/date.utils.ts`**
-- `hoje(): string` — retorna YYYY-MM-DD em timezone America/Sao_Paulo
-- `formatarDataBR(iso: string): string` — "15/08/2026"
-- `formatarDataCurta(iso: string): string` — "15/08"
-- `adicionarMeses(data: string, meses: number): string` — com regra de meses curtos
-- `proximoVencimento(diaFixo: number, dataReferencia: string): string` — próxima ocorrência do dia a partir de dataReferencia (inclusive)
-- `diasEntre(data1: string, data2: string): number` — diferença em dias corridos
-- `mesAlvoExisteDia(ano: number, mes: number, dia: number): boolean`
-
-**3c. `domain/billing-cycle.ts`**
-- `calcularVencimentoParcela(primeiroVencimento: string, diaVencimentoFixo: number, numeroParcela: number): string`
-- Parcela 1: retorna primeiroVencimento
-- Parcela N (N>1): adicionarMeses(primeiroVencimento, N-1), depois ajustar para diaVencimentoFixo com regra de meses curtos
-
-**3d. `domain/parcel.rules.ts`**
-- `gerarParcelas(cobranca: CobrancaInput): ParcelaInput[]`
-- Retorna array de N parcelas com numeroParcela, valor, dataVencimento, status=pendente
-- Usa math.utils para divisão e billing-cycle para datas
-
-**3e. `domain/status.rules.ts`**
-- `proximoStatus(statusAtual: ParcelaStatus, acao: AcaoStatus): { novoStatus: ParcelaStatus, camposAtualizar: Partial<Parcela> }`
-- `podeEditarCobranca(parcelas: Parcela[]): boolean` — true se todas tem status=pendente
-- `podeExcluirCobranca(parcelas: Parcela[]): boolean` — true se nenhuma tem status=pago ou valorPago != null
-- `desfazerStatus(statusAtual: ParcelaStatus, valorPagoAtual: number, estadoAnterior: EstadoAnterior): { novoStatus: ParcelaStatus, camposAtualizar: Partial<Parcela> }`
-
-**3f. `domain/overdue.rules.ts`**
-- `isAtrasada(parcela: Parcela, dataReferencia: string): boolean` — dataVencimento < dataReferencia AND status IN (pendente, cobrado, pago_parcial) AND !arquivada
-- `diasAtraso(parcela: Parcela, dataReferencia: string): number` — diasEntre(dataVencimento, dataReferencia)
-- `corAtraso(dias: number): 'laranja' | 'vermelho'` — 1-3 = laranja, 4+ = vermelho
-- `ordenarParcelas(parcelas: Parcela[], dataReferencia: string): Parcela[]` — atrasadas vermelhas, atrasadas laranjas, cobradas hoje, pendentes hoje
-
-**3g. `domain/charge.rules.ts`**
-- `validarCobranca(input: CobrancaInput): { valido: boolean, erros: string[] }`
-- Todas as validações do PRD 7.1
-- `calcularPrimeiroVencimentoSugerido(diaFixo: number): string` — usa date.utils.proximoVencimento com hoje()
-
-**3h. `lib/validation.utils.ts`**
-- `validarTelefone(telefone: string): boolean` — 12-13 dígitos, só números
-- `validarValorMonetario(valor: number): boolean` — >0 e <=999999.99
-- `validarQuantidadeParcelas(qtd: number): boolean` — 1-60
-- `validarNomeProduto(nome: string): boolean` — mínimo 3 chars
-- `normalizarTelefone(input: string): string` — remove tudo que não é dígito, adiciona 55 se não tiver DDI
-
-**3i. `lib/format.utils.ts`**
-- `formatarMoeda(valor: number): string` — "R$ 200,00"
-- `formatarTelefone(telefone: string): string` — "(11) 98765-4321"
-- `formatarTelefoneCurto(telefone: string): string` — "(11) 98765..."
-
-**Dependências:** Nenhuma (funções puras)
-
-**Critérios de conclusão:**
-- [ ] `dividirValor(100, 3)` → { valorBase: 33.33, valorUltima: 33.34 }
-- [ ] `dividirValor(200, 2)` → { valorBase: 100, valorUltima: 100 }
-- [ ] `dividirValor(99.99, 3)` → soma das 3 parcelas = 99.99
-- [ ] `adicionarMeses("2026-01-30", 1)` → "2026-02-28" (fevereiro não bissexto)
-- [ ] `adicionarMeses("2024-01-30", 1)` → "2024-02-29" (2024 bissexto)
-- [ ] `adicionarMeses("2026-03-31", 1)` → "2026-04-30" (abril tem 30 dias)
-- [ ] `proximoVencimento(10, "2026-07-05")` → "2026-07-10" (mesmo mês, dia maior)
-- [ ] `proximoVencimento(10, "2026-07-15")` → "2026-08-10" (próximo mês, dia já passou)
-- [ ] `proximoVencimento(10, "2026-07-10")` → "2026-07-10" (hoje inclusive)
-- [ ] `gerarParcelas` para 3x R$600, primeiroVencimento 15/07, diaFixo 10 → 3 parcelas com datas 15/07, 10/08, 10/09
-- [ ] `isAtrasada` com dataVencimento ontem e status=pendente → true
-- [ ] `isAtrasada` com dataVencimento ontem e status=pago → false
-- [ ] `isAtrasada` com dataVencimento ontem e arquivada=true → false
-- [ ] `diasAtraso` com vencimento 10/07 e hoje 20/07 → 10
-- [ ] `corAtraso(2)` → laranja
-- [ ] `corAtraso(4)` → vermelho
-- [ ] `validarCobranca` com forma=pix e pixUtilizado vazio → invalido
-- [ ] `validarCobranca` com valor=0 → invalido
-- [ ] `validarTelefone("5511987654321")` → true
-- [ ] `validarTelefone("11987654321")` → false (sem DDI)
-- [ ] `normalizarTelefone("11 98765-4321")` → "5511987654321"
-- [ ] `formatarMoeda(200)` → "R$ 200,00"
-- [ ] `formatarMoeda(33.34)` → "R$ 33,34"
-
-**Testes antes de avançar:**
-1. Rodar cada função com os casos de teste listados acima em um script de testes unitários
-2. Testar edge cases: dia 30 em fevereiro, dia 31 em meses curtos, ano bissexto, valor que divide exato, valor que não divide
-3. Verificar que nenhuma função tem side effects (são puras)
-
----
-
-### Módulo M5: Types e Config
-
-**Objetivo:** Definir todas as tipagens TypeScript e configurações.
-
-**Tarefas:**
-1. `types/client.types.ts` — Cliente, ClienteInput, ClienteUpdate
-2. `types/product.types.ts` — ProdutoServico, ProdutoInput
-3. `types/charge.types.ts` — Cobranca, CobrancaInput, CobrancaUpdate, FormaPagamento enum
-4. `types/parcel.types.ts` — Parcela, ParcelaStatus, AcaoStatus, EstadoAnterior
-5. `types/common.types.ts` — DiasVencimento, EventTypes, ResultadoOperacao
-6. `config/days.config.ts` — export const DIAS_VENCIMENTO = [5, 10, 15, 20, 25, 30]
-7. `config/messages.config.ts` — templates de mensagem WhatsApp (3 variações do PRD seção 15)
-8. `config/app.config.ts` — constantes gerais (MAX_PARCELAS=60, MAX_VALOR=999999.99, UNDO_TIMEOUT=5000, TOAST_DURATION=5000)
-9. `lib/event-bus.ts` — implementação do EventBus (emit, on, off, once)
-
-**Dependências:** Nenhuma (apenas definições de tipos e constantes)
+**Dependências:** Nenhuma
 
 **Critérios de conclusão:**
 - [ ] Todos os tipos compilam sem erro
 - [ ] DIAS_VENCIMENTO tem exatamente [5, 10, 15, 20, 25, 30]
-- [ ] FormaPagamento tem exatamente 5 valores (sem boleto)
+- [ ] FormaPagamento tem 5 valores (sem boleto)
 - [ ] ParcelaStatus tem 5 valores (pendente, cobrado, pago, pago_parcial, arquivado)
 - [ ] EventBus: emit dispara callback registrado via on
 - [ ] EventBus: off remove callback
 - [ ] EventBus: once dispara apenas uma vez
-- [ ] messages.config.ts tem 3 templates (hoje, atrasada, pago parcial) com placeholders [Nome], [Valor], [Produto], [Data], [PIX]
+- [ ] messages.config.ts tem 3 templates com placeholders corretos
+- [ ] `gerarLinkWhatsApp("5511987654321", "Olá")` → `https://wa.me/5511987654321?text=Ol%C3%A1`
+- [ ] `gerarMensagem` para parcela vencendo hoje com PIX → mensagem contém "vence hoje", chave PIX, sem saldo devedor
+- [ ] `gerarMensagem` para parcela atrasada → mensagem contém "venceu no dia" e "Pode verificar o pagamento?"
+- [ ] `gerarMensagem` para pago_parcial → mensagem contém "R$ X pendentes"
+- [ ] `gerarMensagem` para forma=dinheiro → mensagem NÃO contém "Forma de pagamento" nem "Chave"
+- [ ] `copiar("teste")` retorna true
 
 **Testes antes de avançar:**
 1. Compilar todos os arquivos .ts sem erros
 2. Testar EventBus: registrar listener, emitir evento, confirmar callback disparado
-3. Testar EventBus: registrar listener com once, emitir 2x, confirmar que só disparou 1x
+3. Testar EventBus: once → emitir 2x → só disparou 1x
+4. Gerar link WhatsApp para 3 cenários (hoje, atrasada, pago parcial) → validar formato
+5. Testar clipboard em pelo menos 1 browser
 
 ---
 
-## Fase 3 — Serviços
+## Sprint 2 — Utils e Componentes Base
 
-### Módulo M4: Services
+### Módulo M3a: Utils (Funções Puras de Utilidade)
 
-**Objetivo:** Implementar a camada de comunicação externa.
+**Objetivo:** Implementar funções puras de matemática, data, formatação e validação.
 
 **Tarefas:**
 
-**4a. `services/api.service.ts`**
-- Wrapper das entities do Base44 SDK
-- `listarClientes(filtro?)`, `buscarCliente(id)`, `criarCliente(input)`, `atualizarCliente(id, data)`, `inativarCliente(id)`, `reativarCliente(id)`
-- `listarProdutos()`, `criarProduto(input)`, `atualizarProduto(id, data)`, `excluirProduto(id)`
-- `listarCobrancasPorCliente(clienteId)`, `buscarCobranca(id)`
-- `listarParcelasDashboard(dataReferencia)`, `listarParcelasAtrasadas(dataReferencia)`, `listarProximosVencimentos(dataReferencia)`
-- `atualizarStatusParcela(id, novoStatus, campos)`, `arquivarParcela(id)`, `desarquivarParcela(id)`
-- `criarCobranca(input)` → chama backend function createCobranca
-- `editarCobranca(id, input)`, `excluirCobranca(id)`
-- `buscarConfiguracao()`, `salvarConfiguracao(data)`
-- `buscarAutocompletePIX()` → distinct pixUtilizado ordenado por frequência
-- `buscarClientesRecentes()` → 5 clientes mais recentes em cobranças
-- `buscarCobrancasPorClienteRecentes(clienteId, limite)` → últimas 3 cobranças (para cadastro inteligente)
+**3a-1. `lib/math.utils.ts`**
+- `dividirValor(valor: number, parcelas: number): { valorBase: number, valorUltima: number }`
+- `valorBase = Math.floor((valor / parcelas) * 100) / 100` (truncate em 2 casas)
+- `valorUltima = Math.round((valor - (valorBase * (parcelas - 1))) * 100) / 100` (round para evitar float drift)
+- Todos os valores em reais com 2 casas decimais (não centavos inteiros)
 
-**4b. `services/whatsapp.service.ts`**
-- `gerarLinkWhatsApp(telefone: string, mensagem: string): string` → `wa.me/{telefone}?text={encodeURIComponent(mensagem)}`
-- `gerarMensagem(parcela: Parcela, cobranca: Cobranca, cliente: Cliente): string` → usa template do messages.config
-- Seleção de template: se pago_parcial → template de pago parcial; se atrasada → template atrasada; senão → template hoje
-- Substituição de placeholders: [Nome] = cliente.nome, [Valor] = formatarMoeda(parcela.valor), [Produto] = cobranca.nomeProdutoServico, [Data] = formatarDataCurta(parcela.dataVencimento), [PIX] = cobranca.pixUtilizado, [SaldoDevedor] = formatarMoeda(parcela.valor - parcela.valorPago)
-- Inclui linhas de PIX apenas se formaPagamento = pix E pixUtilizado != null
+**3a-2. `lib/date.utils.ts`**
+- `hoje(): string` — retorna YYYY-MM-DD em timezone America/Sao_Paulo (não UTC)
+- `formatarDataBR(iso: string): string` — "15/08/2026"
+- `formatarDataCurta(iso: string): string` — "15/08"
+- `adicionarMeses(data: string, meses: number): string` — regra: se o dia não existe no mês alvo, usar o último dia do mês
+- `proximoVencimento(diaFixo: number, dataReferencia: string): string` — próxima ocorrência do diaFixo a partir de dataReferencia (inclusive)
+- `diasEntre(data1: string, data2: string): number` — diferença em dias corridos (data2 - data1)
+- `mesAlvoExisteDia(ano: number, mes: number, dia: number): boolean`
+- `ehFimDeSemana(data: string): boolean` — sábado (6) ou domingo (0)
 
-**4c. `services/clipboard.service.ts`**
-- `copiar(texto: string): Promise<boolean>` — usa navigator.clipboard.writeText
-- Fallback para execCommand se navigator.clipboard não disponível
+**3a-3. `lib/format.utils.ts`**
+- `formatarMoeda(valor: number): string` — "R$ 200,00" (Intl.NumberFormat pt-BR)
+- `formatarTelefone(telefone: string): string` — "(11) 98765-4321"
+- `formatarTelefoneCurto(telefone: string): string` — "(11) 98765..."
 
-**Dependências:** M1 (entities), M3 (domain), M5 (types)
+**3a-4. `lib/validation.utils.ts`**
+- `validarTelefone(telefone: string): boolean` — 12-13 dígitos, só números
+- `validarValorMonetario(valor: number): boolean` — >0 e <=999999.99
+- `validarQuantidadeParcelas(qtd: number): boolean` — 1-60
+- `validarNomeProduto(nome: string): boolean` — mínimo 3 chars
+- `normalizarTelefone(input: string): string` — remove não-dígitos, adiciona "55" se não tem DDI
 
-**Critérios de conclusão:**
-- [ ] `listarClientes` retorna array de clientes do Base44
-- [ ] `criarCliente` cria registro e retorna com id
-- [ ] `criarCobranca` chama backend function e retorna cobrancaId + parcelas
-- [ ] `listarParcelasDashboard` filtra corretamente (dataVencimento == hoje, status correto, arquivada=false, cliente.ativo=true)
-- [ ] `gerarLinkWhatsApp` retorna URL válida no formato wa.me/5511987654321?text=...
-- [ ] `gerarMensagem` para parcela vencendo hoje com PIX → mensagem contém "vence hoje", chave PIX, sem menção a saldo devedor
-- [ ] `gerarMensagem` para parcela atrasada → mensagem contém "venceu no dia" e "Pode verificar o pagamento?"
-- [ ] `gerarMensagem` para pago_parcial → mensagem contém "tem R$ X pendentes"
-- [ ] `gerarMensagem` para forma=dinheiro → mensagem NÃO contém "Forma de pagamento" nem "Chave"
-- [ ] `copiar` retorna true e texto está na área de transferência
-
-**Testes antes de avançar:**
-1. Criar cliente via api.service → ler via read_entities → confirmar que foi criado
-2. Criar cobrança via api.service (chamando backend function) → confirmar parcelas geradas
-3. Gerar link WhatsApp para 3 cenários (hoje, atrasada, pago parcial) → validar formato do link e conteúdo da mensagem
-4. Testar clipboard em pelo menos 1 browser
-5. Testar listarParcelasDashboard com os dados de teste do M1 → confirmar que retorna apenas as parcelas corretas
-
----
-
-## Fase 4 — Hooks
-
-### Módulo M6: Hooks (Event-Based)
-
-**Objetivo:** Implementar hooks customizados com cache em memória e invalidação por EventBus.
-
-**Tarefas:**
-
-**6a. `hooks/useClients.ts`**
-- `useClients()` → { clientes, loading, error, refresh }
-- Cache em useRef, invalidado por eventos `client:created`, `client:updated`, `client:inactivated`
-- Busca via api.service.listarClientes
-
-**6b. `hooks/useProducts.ts`**
-- `useProducts()` → { produtos, loading, error, refresh }
-- Ordenado por vezesUsado descendente
-- Invalidado por `product:created`, `product:updated`, `product:deleted`, `charge:created` (atualiza vezesUsado)
-
-**6c. `hooks/useCharges.ts`**
-- `useCharges(clienteId)` → { cobrancas, loading, error }
-- Retorna cobrancas + parcelas de um cliente (para histórico)
-- Limitado a 5 recentes por padrão, com opção de carregar todas
-- Invalidado por `charge:created`, `charge:updated`, `charge:deleted`, `parcel:updated`
-
-**6d. `hooks/useDashboard.ts`**
-- `useDashboard()` → { parcelasHoje, parcelasAtrasadas, proximosVencimentos, contadores, loading, error, refresh }
-- Calcula atrasados em tempo real (overdue.rules)
-- Ordena parcelas (overdue.rules.ordenarParcelas)
-- Invalidado por `parcel:paid`, `parcel:charged`, `parcel:archived`, `charge:created`, `charge:deleted`, `client:inactivated`
-- `refresh()` força nova busca
-
-**6e. `hooks/useParcelActions.ts`**
-- `useParcelActions()` → { marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar, desarquivar, desfazerPagamento }
-- Cada ação: executa via api.service, emite evento EventBus, retorna estado para undo
-- `marcarPago(parcelaId, estadoAnterior)` → atualiza status=pago, dataPagamento=hoje, valorPago=valor. Emite `parcel:paid`. Retorna função undo.
-- `marcarParcial(parcelaId, valorRecebido)` → se >= saldo: trata como total. Senão: status=pago_parcial, valorPago+=valor. Emite `parcel:updated`.
-- `confirmarEnvio(parcelaId)` → status=cobrado, dataCobrancaEnviada=hoje. Emite `parcel:charged`.
-- `arquivar(parcelaId)` → arquivada=true. Emite `parcel:archived`.
-- `desarquivar(parcelaId)` → arquivada=false. Emite `parcel:unarchived`.
-- `desfazerPagamento(parcelaId, estadoAnterior)` → restaura status e campos do estadoAnterior. Emite `parcel:updated`.
-
-**6f. `hooks/useBatchSelect.ts`**
-- `useBatchSelect()` → { selecionadas, toggle, selecionarTodas, limpar, marcarLoteComoPago }
-- Estado em useState (array de parcelaIds)
-- `marcarLoteComoPago()` → chama useParcelActions.marcarPago para cada uma, emite 1 evento `parcel:batch:paid`, retorna undo para todas
-
-**6g. `hooks/useConfig.ts`**
-- `useConfig()` → { config, loading, error, salvar }
-- Busca registro único de Configuracao. Se não existe, cria com defaults [1,2,3,4,5].
-- `salvar(diasTrabalhados)` → atualiza registro.
-
-**Dependências:** M4 (services), M5 (types + event-bus)
+**Dependências:** M5 (types)
 
 **Critérios de conclusão:**
-- [ ] `useClients` carrega lista de clientes ao montar
-- [ ] `useClients` não refaz a chamada se já tem cache (a menos que evento seja emitido)
-- [ ] Criar cliente → emitir `client:created` → `useClients` refaz busca
-- [ ] `useDashboard` retorna parcelas de hoje separadas das atrasadas
-- [ ] `useDashboard` calcula diasAtraso e cor corretamente
-- [ ] `useDashboard` contadores refletem soma de parcelas e valores
-- [ ] `useParcelActions.marcarPago` atualiza status no backend e emite evento
-- [ ] `useParcelActions.marcarPago` retorna função de undo que restaura estado anterior
-- [ ] `useBatchSelect` permite selecionar 3 parcelas e marcar todas como pagas
-- [ ] `useConfig` cria registro de Configuracao com defaults se não existe
-- [ ] Todos os hooks usam EventBus (sem setInterval, sem polling)
+- [ ] `dividirValor(100, 3)` → { valorBase: 33.33, valorUltima: 33.34 }
+- [ ] `dividirValor(200, 2)` → { valorBase: 100, valorUltima: 100 }
+- [ ] `dividirValor(99.99, 3)` → soma das 3 parcelas (valorBase×2 + valorUltima) = 99.99
+- [ ] `dividirValor(1500, 10)` → { valorBase: 150, valorUltima: 150 }
+- [ ] `adicionarMeses("2026-01-30", 1)` → "2026-02-28" (fevereiro não bissexto)
+- [ ] `adicionarMeses("2024-01-30", 1)` → "2024-02-29" (2024 bissexto)
+- [ ] `adicionarMeses("2026-03-31", 1)` → "2026-04-30" (abril tem 30 dias)
+- [ ] `adicionarMeses("2026-01-31", 2)` → "2026-03-31" (março tem 31 dias)
+- [ ] `proximoVencimento(10, "2026-07-05")` → "2026-07-10"
+- [ ] `proximoVencimento(10, "2026-07-15")` → "2026-08-10"
+- [ ] `proximoVencimento(10, "2026-07-10")` → "2026-07-10" (inclusive)
+- [ ] `hoje()` retorna data no formato YYYY-MM-DD (não ISO datetime)
+- [ ] `diasEntre("2026-07-10", "2026-07-20")` → 10
+- [ ] `formatarMoeda(200)` → "R$ 200,00"
+- [ ] `formatarMoeda(66.67)` → "R$ 66,67"
+- [ ] `normalizarTelefone("11 98765-4321")` → "5511987654321"
+- [ ] `validarValorMonetario(0)` → false
+- [ ] `validarQuantidadeParcelas(61)` → false
+- [ ] `validarNomeProduto("ab")` → false
 
 **Testes antes de avançar:**
-1. Montar componente de teste com useDashboard → confirmar que carrega dados
-2. Emitir evento `parcel:paid` manualmente → confirmar que useDashboard refaz busca
-3. Chamar marcarPago em uma parcela → confirmar status mudou no backend
-4. Chamar função de undo → confirmar status voltou
-5. Selecionar 3 parcelas via useBatchSelect → marcar lote → confirmar 3 parcelas pagas
-6. Verificar que useClients não faz nova chamada quando cache está válido (sem evento)
+1. Rodar todos os testes de critérios de conclusão acima
+2. Verificar que `hoje()` não retorna data em UTC quando executado após 21:00 no Brasil
+3. Verificar que `dividirValor` com 7 parcelas de R$ 100 → soma exata = 100.00
 
 ---
-
-## Fase 5 — Componentes
 
 ### Módulo M7: Componentes Base
 
@@ -373,138 +285,549 @@ Fase 8: Validação         M15
 
 **Tarefas (cada componente é independente):**
 
-1. **`StatusBadge`** — recebe status + diasAtraso → renderiza badge colorido (pendente=neutro, cobrado=amarelo, pago=verde, pago_parcial=azul, atrasado laranja/vermelho)
-2. **`DayBadge`** — recebe número do dia → renderiza badge "Dia 05"
-3. **`EmptyState`** — recebe título + descrição opcional → estado vazio amigável
-4. **`UndoToast`** — recebe mensagem + onUndo → toast fixo no rodapé, some em 5s
-5. **`SearchInput`** — recebe onChange + placeholder → input com debounce de 150ms e ícone de lupa
-6. **`CopyButton`** — recebe texto + label → botão que copia para clipboard, mostra "Copiado!" por 2s
-7. **`WhatsAppButton`** — recebe telefone + mensagem → botão que abre wa.me link
-8. **`DaySelector`** — recebe value + onChange → 6 botões grandes (05, 10, 15, 20, 25, 30), selecionado destaca
+1. **`components/StatusBadge`** — recebe status + diasAtraso → badge colorido (pendente=neutro/muted, cobrado=amarelo/warning, pago=verde/success, pago_parcial=azul/info, atrasado 1-3 dias=laranja, atrasado 4+=vermelho/destructive)
+2. **`components/DayBadge`** — recebe número do dia → badge "Dia 05"
+3. **`components/EmptyState`** — recebe título + descrição opcional → estado vazio
+4. **`components/UndoToast`** — recebe mensagem + onUndo → toast fixo no rodapé, desaparece após 5s
+5. **`components/SearchInput`** — debounce 300ms, callback onChange, ícone de lupa, botão limpar
+6. **`components/CopyButton`** — recebe texto, ao clicar copia para clipboard, feedback "Copiado!" por 2s
 
-**Dependências:** M5 (types), M3 (format.utils)
+**Dependências:** M5 (types), M3a (format.utils para StatusBadge usar formatarMoeda)
 
 **Critérios de conclusão:**
-- [ ] StatusBadge mostra cor correta para cada status
-- [ ] StatusBadge com atrasado 2 dias → laranja; 5 dias → vermelho
-- [ ] UndoToast desaparece após 5 segundos
-- [ ] UndoToast chama onUndo ao clicar
-- [ ] SearchInput só dispara onChange após 150ms sem digitar
+- [ ] StatusBadge renderiza corretamente para cada um dos 5 status + 2 variações de atraso
+- [ ] DayBadge renderiza "Dia 05" para input 5
+- [ ] EmptyState renderiza título e descrição
+- [ ] UndoToast aparece ao chamar, desaparece após 5s, botão [Desfazer] chama callback
+- [ ] SearchInput debounce 300ms (não dispara a cada tecla)
 - [ ] CopyButton copia texto e mostra "Copiado!" por 2s
-- [ ] WhatsAppButton gera link wa.me correto
-- [ ] DaySelector mostra 6 botões e destaca o selecionado
-- [ ] Todos os componentes aceitam className para estilização customizada
-- [ ] Todos os componentes são memoizados (React.memo)
+- [ ] Nenhum componente usa setInterval (UndoToast usa setTimeout)
+- [ ] Todos componentes são React.memo
 
 **Testes antes de avançar:**
-1. Renderizar cada componente isoladamente com props diferentes
-2. Verificar que SearchInput não dispara a cada tecla (debounce)
-3. Verificar que UndoToast desaparece sozinho em 5s
-4. Verificar que CopyButton realmente copia (testar colar em outro lugar)
+1. Renderizar StatusBadge com cada status → verificar cor e texto
+2. Renderizar UndoToast → esperar 5s → verificar que desaparece
+3. Digitar no SearchInput → verificar que callback só dispara após 300ms
+4. Clicar em CopyButton → verificar clipboard contém o texto
 
 ---
 
-### Módulo M8: Componentes Compostos
+## Sprint 3 — Backend Functions e Domain Logic
 
-**Objetivo:** Implementar componentes que combinam componentes base e hooks.
+### Módulo M2: Backend Function — createCobranca
+
+**Objetivo:** Deployar a backend function que cria cobrança + parcelas com compensação best-effort em falha.
+
+**Tarefas:**
+1. Escrever `functions/createCobranca.ts`:
+   - Receber payload: `{ clienteId, produtoServicoId, nomeProdutoServico, valor, formaPagamento, quantidadeParcelas, primeiroVencimento, diaVencimentoFixo, pixUtilizado, observacoes }`
+   - **Validação:** valor >0 e <=999999.99; quantidadeParcelas 1-60; se formaPagamento=pix → pixUtilizado obrigatório; nomeProdutoServico mínimo 3 chars; primeiroVencimento é YYYY-MM-DD válido; diaVencimentoFixo ∈ [5,10,15,20,25,30]; formaPagamento ∈ [pix, dinheiro, cartao_credito, cartao_debito, transferencia]
+   - **Criar Cobranca** via `base44.entities.Cobranca.create()`
+   - **Calcular parcelas** (lógica duplicada de M3a — ver "Duplicação consciente" abaixo):
+     - `valorBase = Math.floor((valor / quantidadeParcelas) * 100) / 100`
+     - `valorUltima = Math.round((valor - (valorBase * (quantidadeParcelas - 1))) * 100) / 100`
+     - Para cada parcela i (1 a N): `dataVencimento = calcularVencimento(primeiroVencimento, diaVencimentoFixo, i)`
+     - `calcularVencimento`: parcela 1 = primeiroVencimento; parcela N = adicionarMeses(primeiroVencimento, N-1), depois ajustar para diaVencimentoFixo se diferente, com regra de mês curto
+   - **Criar parcelas em batch** via `base44.entities.Parcela.createMany()` (uma chamada, N registros)
+   - Se batch falha: **deletar cobranca criada** via `base44.entities.Cobranca.delete(cobrancaId)`
+   - Se delete também falha: retornar erro para o frontend. Cobranca órfã fica no banco mas o frontend trata como não criada.
+   - **Incrementar vezesUsado** via `base44.asServiceRole.entities.ProdutoServico.update()` (service role para cross-entity update com RLS). Se produtoServicoId = null, pular.
+   - Se incremento de vezesUsado falha: não é crítico. Registrar log e continuar.
+   - Retornar `{ sucesso: true, cobrancaId, parcelas: [...] }`
+2. Deploy via `deploy_backend_function`
+3. Testar via `test_backend_function`
+
+**Duplicação consciente:** As funções `dividirValor` e `adicionarMeses` são implementadas dentro de `createCobranca.ts` sem importar de `lib/`. Backend functions em Base44 são isoladas. A duplicação é controlada: se uma regra muda em M3a, o critério de não-avanço exige revalidação de M2 com os mesmos testes.
+
+**Dependências:** M1 (entities), M3a (lógica de referência para duplicar)
+
+**Critérios de conclusão:**
+- [ ] Function deployed e acessível via HTTP
+- [ ] Criar cobrança à vista → retorna 1 parcela com valor = valor total
+- [ ] Criar cobrança 3x R$100 → 3 parcelas (33.33, 33.33, 33.34)
+- [ ] Soma das parcelas = exatamente 100.00 em 5 cenários (à vista, 2x, 3x, 7x, 12x)
+- [ ] diaVencimentoFixo=30, primeiroVencimento=2026-01-30, 3 parcelas → parcela 2 vence 28/02/2026
+- [ ] diaVencimentoFixo=30, primeiroVencimento=2024-01-30, 3 parcelas → parcela 2 vence 29/02/2024
+- [ ] formaPagamento=pix, pixUtilizado vazio → erro de validação
+- [ ] valor=0 → erro de validação
+- [ ] quantidadeParcelas=61 → erro de validação
+- [ ] nomeProdutoServico="ab" → erro de validação
+- [ ] produtoServicoId != null → vezesUsado incrementa (verificar via read_entities)
+- [ ] produtoServicoId = null → vezesUsado não incrementa
+- [ ] Falha simulada no batch de parcelas → cobranca é deletada (compensação)
+
+**Testes antes de avançar:**
+1. Chamar function com payload completo e válido → confirmar cobranca + parcelas criadas
+2. Payload inválido (PIX sem chave) → confirmar erro e nenhum registro criado
+3. Verificar vezesUsado incrementou após criar cobrança com produto
+4. Verificar soma das parcelas em 5 cenários
+5. Verificar fevereiro bissexto e não bissexto
+
+---
+
+### Módulo M2b: Backend Function — editarCobranca
+
+**Objetivo:** Deployar a backend function que edita uma cobrança existente, regenerando parcelas quando permitido.
+
+**Tarefas:**
+1. Escrever `functions/editarCobranca.ts`:
+   - Receber payload: `{ cobrancaId, observacoes, pixUtilizado, valor, quantidadeParcelas, primeiroVencimento, diaVencimentoFixo }`
+   - **Verificar parcelas existentes** via `base44.entities.Parcela.list({ cobrancaId })`
+   - **Regra de permissão:**
+     - Se alguma parcela tem status=pago ou pago_parcial ou valorPago != null → permitir apenas editar `observacoes` e `pixUtilizado`. Rejeitar mudança de valor/parcelas/datas.
+     - Se todas as parcelas têm status=pendente ou cobrado → permitir edição completa (regenerar parcelas).
+   - **Estratégia de regeneração (criar-antes-de-deletar):**
+     1. Calcular novas parcelas (mesma lógica do M2)
+     2. Criar novas parcelas em batch
+     3. Se batch falha: retornar erro. Parcelas antigas continuam existindo.
+     4. Se batch sucesso: deletar parcelas antigas via `base44.entities.Parcela.deleteMany({ cobrancaId_old_parcelas })`
+     5. Atualizar cobranca com novos campos
+   - **Incrementar/decrementar vezesUsado:** se produtoServicoId mudou (não deveria, pois edição não muda produto), tratar separadamente. Se produto não mudou, vezesUsado não altera.
+   - Retornar `{ sucesso: true, cobrancaId, parcelas: [...] }`
+2. Deploy via `deploy_backend_function`
+3. Testar via `test_backend_function`
+
+**Dependências:** M1, M3a (lógica de referência)
+
+**Critérios de conclusão:**
+- [ ] Editar cobrança com todas parcelas pendentes → parcelas são regeneradas
+- [ ] Editar cobrança com parcela cobrada → parcelas são regeneradas (cobrado != pago)
+- [ ] Editar cobrança com parcela paga → apenas observacoes/pixUtilizado são atualizadas
+- [ ] Editar cobrança com parcela pago_parcial → apenas observacoes/pixUtilizado são atualizadas
+- [ ] Após regeneração: parcelas antigas não existem mais
+- [ ] Após regeneração: novas parcelas têm status=pendente
+- [ ] Falha simulada no batch de novas parcelas → parcelas antigas continuam existindo
+
+**Testes antes de avançar:**
+1. Criar cobrança 3x via M2 → editar para 5x → confirmar 5 parcelas, 3 antigas deletadas
+2. Criar cobrança → marcar 1 parcela como pago → tentar editar valor → confirmar rejeição
+3. Criar cobrança → editar observacoes → confirmar alteração sem regenerar parcelas
+4. Simular falha no batch → confirmar parcelas antigas preservadas
+
+---
+
+### Módulo M3b: Domain Logic
+
+**Objetivo:** Implementar as regras de negócio como funções puras, usando M3a e M5.
 
 **Tarefas:**
 
-1. **`ChargeCard`** — card de parcela no Dashboard
-   - Props: parcela, cobranca, cliente, onCobrar, onMarcarPago, onMarcarParcial, onArquivar, onSelecionar, expandido
-   - Renderiza: nome cliente, produto, número parcela, valor, status badge, dias atraso
-   - Botões: [💬 Cobrar/Reenviar] [✓ Marcar pago]
-   - Toque no corpo expande: observações, PIX (com CopyButton), data cobrança enviada, [Arquivar]
-   - Círculo de seleção à esquerda (toque seleciona para lote)
-   - Menu inline ao clicar [✓ Marcar pago]: "Pagamento total" e "Pagamento parcial"
-   - Input inline para valor parcial com máscara de moeda
-   - Estados visuais: neutro (pendente hoje), amarelo (cobrado), laranja (atrasado 1-3 dias), vermelho (atrasado 4+ dias), azul (pago parcial)
+**3b-1. `domain/billing-cycle.ts`**
+- `calcularVencimentoParcela(primeiroVencimento: string, diaVencimentoFixo: number, numeroParcela: number): string`
+- Parcela 1: retorna primeiroVencimento
+- Parcela N (N>1): `adicionarMeses(primeiroVencimento, N-1)`, depois ajustar para o diaVencimentoFixo. Se o diaVencimentoFixo não existe no mês, usar o último dia do mês.
+  - Ex: primeiroVencimento=15/01, diaFixo=10, parcela 2 → 10/02 (não 15/02)
+  - Ex: primeiroVencimento=30/01, diaFixo=30, parcela 2 → 28/02 (fevereiro)
 
-2. **`ClientAutocomplete`** — busca de cliente com "Recentes"
-   - Props: value, onChange, clientes, clientesRecentes
-   - Input com debounce, filtra por nome ou telefone
-   - Seção "Recentes" no topo (5 clientes)
-   - Botão "+ Cadastrar novo cliente" → callback onNewClient
+**3b-2. `domain/parcel.rules.ts`**
+- `gerarParcelas(input: CobrancaInput): ParcelaInput[]`
+- Retorna array de N parcelas com numeroParcela, valor (dividirValor), dataVencimento (billing-cycle), status=pendente
+- `podeEditarCobranca(parcelas: Parcela[]): boolean` — true se todas têm status=pendente ou cobrado
+- `podeExcluirCobranca(parcelas: Parcela[]): boolean` — true se nenhuma tem status=pago, pago_parcial, ou valorPago != null
 
-3. **`ProductAutocomplete`** — busca de produto com "Mais vendidos"
-   - Props: value, onChange, produtos (já ordenados por vezesUsado)
-   - Input com debounce
-   - Seção "Mais vendidos" no topo (3-5 produtos)
-   - Botão "+ Cadastrar novo serviço" → callback onNewProduct
-   - Botão "Venda avulsa" → mostra input "O que foi vendido?" (mín 3 chars)
+**3b-3. `domain/status.rules.ts`**
+- `proximoStatus(statusAtual: ParcelaStatus, acao: AcaoStatus): { novoStatus: ParcelaStatus, camposAtualizar: Partial<Parcela> }`
+- Transições do PRD v2.0 seção 7.2
+- `desfazerStatus(estadoAnterior: EstadoAnterior): { novoStatus: ParcelaStatus, camposAtualizar: Partial<Parcela> }`
+  - Se estadoAnterior.status era pago_parcial → restaura valorPago também
+  - Se estadoAnterior.status era pendente ou cobrado → valorPago = null
 
-4. **`PaymentSelector`** — seletores de forma de pagamento
-   - 5 botões grandes (PIX, Dinheiro, Cartão Crédito, Cartão Débito, Transferência)
-   - Se PIX: campo "PIX utilizado" aparece inline (obrigatório, com autocomplete)
-   - Toggle À Vista / Parcelado
-   - Se Parcelado: seletor [2][3][4][5][6][7][8][9][10][12] + campo livre
+**3b-4. `domain/overdue.rules.ts`**
+- `isAtrasada(parcela: Parcela, dataReferencia: string): boolean`
+  - `dataVencimento < dataReferencia` AND `status IN (pendente, cobrado, pago_parcial)` AND `arquivada = false`
+- `diasAtraso(parcela: Parcela, dataReferencia: string): number`
+  - `diasEntre(parcela.dataVencimento, dataReferencia)` se atrasada; 0 caso contrário
+- `corAtraso(dias: number): "laranja" | "vermelho"` — 1-3 = laranja, 4+ = vermelho
+- `ordenarParcelas(parcelas: Parcela[], dataReferencia: string): Parcela[]`
+  - Ordem: atrasadas vermelhas (mais dias primeiro) → atrasadas laranjas (mais dias primeiro) → cobradas hoje → pendentes hoje
 
-5. **`ParcelPreview`** — pré-visualização de parcelas
-   - Recebe array de parcelas calculadas (número, valor, data)
-   - Renderiza lista numerada
-   - Se >6 parcelas: mostra 5 + "+ N restantes" (expande ao tocar)
-   - Recalcula quando props mudam (recibe parcelas já calculadas do parent)
+**3b-5. `domain/charge.rules.ts`**
+- `validarCobranca(input: CobrancaInput): { valido: boolean, erros: string[] }`
+- Validações: valor >0 e <=999999.99; quantidadeParcelas 1-60; se forma=pix → pixUtilizado obrigatório; nomeProdutoServico mínimo 3 chars; diaVencimentoFixo ∈ [5,10,15,20,25,30]; formaPagamento ∈ [pix, dinheiro, cartao_credito, cartao_debito, transferencia]
+- `calcularPrimeiroVencimentoSugerido(diaFixo: number): string` — `proximoVencimento(diaFixo, hoje())`
 
-6. **`BatchBar`** — barra de ação em lote
-   - Props: quantidadeSelecionada, valorTotal, onMarcarTodas, onCancelar
-   - Fixa no rodapé, aparece quando 2+ selecionados
-
-7. **`OnboardingGuide`** — guia de primeiro acesso
-   - 3 botões grandes com estado (pendente ✓ / destacado)
-   - Callbacks: onCadastrarClientes, onCadastrarServicos, onNovaCobranca
-
-**Dependências:** M7 (componentes base), M5 (types), M3 (format.utils), M4 (whatsapp.service para mensagem)
+**Dependências:** M3a (utils), M5 (types)
 
 **Critérios de conclusão:**
-- [ ] ChargeCard renderiza todos os estados visuais corretamente
-- [ ] ChargeCard menu inline "Marcar pago" abre com "total" e "parcial"
-- [ ] ChargeCard input de valor parcial tem máscara de moeda
-- [ ] ChargeCard expande ao toque no corpo, mostra PIX com CopyButton
-- [ ] ChargeCard tem círculo de seleção que dispara onSelecionar
-- [ ] ClientAutocomplete filtra por nome e telefone
-- [ ] ClientAutocomplete mostra "Recentes" no topo
-- [ ] ProductAutocomplete mostra "Mais vendidos" ordenados por vezesUsado
-- [ ] ProductAutocomplete "Venda avulsa" exige mínimo 3 caracteres
-- [ ] PaymentSelector mostra 5 botões (sem boleto)
-- [ ] PaymentSelector mostra campo PIX apenas quando PIX selecionado
-- [ ] PaymentSelector toggle À Vista/Parcelado funciona
-- [ ] PaymentSelector seletor de parcelas mostra [2]-[12] + campo livre
-- [ ] ParcelPreview mostra lista de parcelas com número, valor e data
-- [ ] ParcelPreview com 10 parcelas mostra 5 + "+ 5 restantes" expandível
-- [ ] BatchBar aparece com 2+ selecionados e mostra valor total
-- [ ] OnboardingGuide mostra 3 botões com estados
+- [ ] `calcularVencimentoParcela("2026-01-15", 10, 1)` → "2026-01-15"
+- [ ] `calcularVencimentoParcela("2026-01-15", 10, 2)` → "2026-02-10"
+- [ ] `calcularVencimentoParcela("2026-01-30", 30, 2)` → "2026-02-28"
+- [ ] `gerarParcelas` para 3x R$600, primeiroVencimento 15/07, diaFixo 10 → 3 parcelas com datas 15/07, 10/08, 10/09 e valores 200/200/200
+- [ ] `isAtrasada` com dataVencimento=ontem, status=pendente → true
+- [ ] `isAtrasada` com dataVencimento=ontem, status=pago → false
+- [ ] `isAtrasada` com dataVencimento=ontem, arquivada=true → false
+- [ ] `isAtrasada` com dataVencimento=hoje, status=pendente → false (hoje não é atrasada)
+- [ ] `diasAtraso` com vencimento 10/07 e hoje 20/07 → 10
+- [ ] `corAtraso(2)` → laranja
+- [ ] `corAtraso(4)` → vermelho
+- [ ] `ordenarParcelas` coloca atrasada 10 dias antes de atrasada 2 dias
+- [ ] `podeEditarCobranca` com todas pendentes → true
+- [ ] `podeEditarCobranca` com uma cobrada → true (cobrado != pago)
+- [ ] `podeEditarCobranca` com uma paga → false
+- [ ] `podeExcluirCobranca` com todas pendentes → true
+- [ ] `podeExcluirCobranca` com uma paga → false
+- [ ] `validarCobranca` com valor=0 → valido=false, erros contém "valor"
+- [ ] `validarCobranca` com pix sem chave → valido=false
+- [ ] `calcularPrimeiroVencimentoSugerido(10)` quando hoje é 05/07 → "2026-07-10"
+- [ ] `calcularPrimeiroVencimentoSugerido(10)` quando hoje é 15/07 → "2026-08-10"
+- [ ] `calcularPrimeiroVencimentoSugerido(10)` quando hoje é 10/07 → "2026-07-10" (inclusive)
 
 **Testes antes de avançar:**
-1. Renderizar ChargeCard com parcela atrasada 10 dias → verificar vermelho + "Atrasada há 10 dias"
-2. Renderizar ChargeCard com pago_parcial → verificar "R$ 100 de R$ 200"
-3. Clicar em "Marcar pago" → verificar menu inline aparece
-4. Clicar em "Pagamento parcial" → verificar input com máscara aparece
-5. Digitar no ClientAutocomplete → verificar filtro em tempo real
-6. Clicar em "Venda avulsa" no ProductAutocomplete → verificar input aparece e não aceita <3 chars
-7. Selecionar PIX no PaymentSelector → verificar campo PIX aparece
-8. Renderizar ParcelPreview com 10 parcelas → verificar truncamento em 5
+1. Rodar todos os testes de critérios acima
+2. `gerarParcelas` para 10x R$ 1500, primeiroVencimento 25/08, diaFixo 25 → verificar 10 parcelas com datas corretas e soma = 1500
+3. `desfazerStatus` com estadoAnterior = pago_parcial (valorPago=100) → restaura status=pago_parcial e valorPago=100
+4. `ordenarParcelas` com mix de atrasadas, cobradas e pendentes → verificar ordem
 
 ---
 
-## Fase 6 — Páginas
+## Sprint 4 — Hooks Básicos e Settings
+
+### Módulo M6a: Hooks Básicos
+
+**Objetivo:** Implementar hooks de CRUD simples com cache em memória e invalidação por EventBus.
+
+**Tarefas:**
+
+**6a-1. `hooks/useClients.ts`**
+- `useClients(): { clientes, loading, error, refresh }`
+- Busca via `Cliente.list()` (SDK direto, sem wrapper)
+- Cache em useRef, invalidado por eventos: `client:created`, `client:updated`, `client:inactivated`
+- `error: string | null` em caso de falha. Se erro, retorna cache anterior (se houver) ou lista vazia.
+
+**6a-2. `hooks/useProducts.ts`**
+- `useProducts(): { produtos, loading, error, refresh }`
+- Busca via `ProdutoServico.list()` ordenado por vezesUsado desc
+- Invalidado por: `product:created`, `product:updated`, `product:deleted`, `charge:created` (atualiza vezesUsado)
+
+**6a-3. `hooks/useCharges.ts`**
+- `useCharges(clienteId: string): { cobrancas, loading, error }`
+- Busca cobrancas + parcelas de um cliente via `Cobranca.filter({ clienteId })`
+- Para cada cobranca, buscar parcelas via `Parcela.filter({ cobrancaId })`
+- Limitado a 5 cobranças recentes por padrão. `carregarTodas()` para paginação.
+- Invalidado por: `charge:created`, `charge:updated`, `charge:deleted`, `parcel:updated`
+
+**6a-4. `hooks/useConfig.ts`**
+- `useConfig(): { config, loading, error, salvar }`
+- Busca registro único de Configuracao via `Configuracao.list()`. Se vazio, cria com defaults `diasTrabalhados = "1,2,3,4,5"`.
+- `salvar(diasTrabalhados: number[])` → atualiza registro. Converte array para string "1,2,3,4,5" antes de salvar. No return, converte string de volta para number[].
+
+**Dependências:** M1 (entities), M3a (format/validation), M5 (types + event-bus)
+
+**Critérios de conclusão:**
+- [ ] `useClients` carrega lista ao montar
+- [ ] `useClients` não refaz chamada se cache válido (sem evento)
+- [ ] Emitir `client:created` → `useClients` refaz busca
+- [ ] `useClients` retorna `error` preenchido se API falha (não crasha)
+- [ ] `useProducts` retorna produtos ordenados por vezesUsado desc
+- [ ] `useCharges` retorna cobrancas + parcelas de um cliente
+- [ ] `useCharges` limita a 5 cobrancas por padrão
+- [ ] `useConfig` cria registro com defaults se não existe
+- [ ] `useConfig.salvar` persiste diasTrabalhados como string
+- [ ] `useConfig` retorna diasTrabalhados como number[]
+- [ ] Nenhum hook usa setInterval ou polling
+
+**Testes antes de avançar:**
+1. Montar componente de teste com `useClients` → confirmar carrega
+2. Emitir `client:created` → confirmar refaz busca
+3. Simular erro de API → confirmar que hook retorna error sem crashar
+4. `useConfig` em sistema sem Configuracao → criar e retornar defaults
+5. `useCharges` para cliente com 10 cobranças → confirmar que retorna 5
+
+---
+
+### Módulo M13: Página Settings
+
+**Objetivo:** Implementar a tela de configuração de dias trabalhados.
+
+**Tarefas:**
+1. Tela com 7 checkboxes (Seg-Dom) usando useConfig
+2. Ao carregar, checkboxes refletem config atual
+3. Ao alterar, estado local atualiza
+4. Botão [Salvar] persiste via `useConfig.salvar`
+5. Texto explicativo: "As cobranças que vencerem em dias não trabalhados aparecerão no próximo dia trabalhado."
+
+**Dependências:** M6a (useConfig), M7 (componentes base)
+
+**Critérios de conclusão:**
+- [ ] Checkboxes refletem config ao carregar
+- [ ] Salvar persiste e mostra toast de confirmação
+- [ ] Default: Seg-Sex marcados, Sáb-Dom desmarcados
+
+**Testes antes de avançar:**
+1. Abrir Settings → verificar checkboxes
+2. Desmarcar Seg → Salvar → recarregar → confirmar Seg desmarcado
+3. Marcar todos → Salvar → confirmar persiste
+
+---
+
+## Sprint 5 — Hooks Complexos, Compostos Core e Páginas Simples
+
+### Módulo M6b: Hooks Complexos
+
+**Objetivo:** Implementar hooks de Dashboard e ações de parcela.
+
+**Tarefas:**
+
+**6b-1. `hooks/useDashboard.ts`**
+- `useDashboard(): { parcelasHoje, parcelasAtrasadas, proximosVencimentos, contadores, loading, error, refresh }`
+- Busca parcelas via `Parcela.list()` filtrando: `arquivada = false`, `dataVencimento <= hoje + 30 dias` (otimização — não trazer parcelas muito futuras)
+- Filtra clientes ativos: busca todos os clientes ativos e filtra parcelas cujo clienteId está na lista
+- **Cálculo de atrasados em tempo real** via `overdue.rules`:
+  - `parcelasAtrasadas = parcelas.filter(p => isAtrasada(p, hoje()))`
+  - `parcelasHoje = parcelas.filter(p => p.dataVencimento === hoje() && !isAtrasada(p, hoje()))`
+  - Ordenar via `ordenarParcelas`
+- **Próximos vencimentos**: próximos 3 dias de vencimento (após hoje) que têm parcelas. Formato: `[{ dia: 10, total: 3, valor: 600 }]`
+- **Contadores**: `{ total: N, valor: R$, atrasadas: N }`
+- Invalidado por: `parcel:paid`, `parcel:charged`, `parcel:archived`, `charge:created`, `charge:deleted`, `client:inactivated`
+
+**6b-2. `hooks/useParcelActions.ts`**
+- `useParcelActions(): { marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar, desarquivar, desfazerPagamento }`
+- `marcarPago(parcelaId, estadoAnterior)`:
+  - Atualiza via `Parcela.update(id, { status: "pago", dataPagamento: hoje(), valorPago: valor })`
+  - Emite `parcel:paid`
+  - Retorna função undo
+- `marcarParcial(parcelaId, valorRecebido, estadoAnterior)`:
+  - Se `valorPago + valorRecebido >= valor` → trata como total (status=pago, valorPago=valor, dataPagamento=hoje)
+  - Senão → `status=pago_parcial`, `valorPago = (valorPago || 0) + valorRecebido`
+  - Emite `parcel:updated`
+- `confirmarEnvio(parcelaId)`:
+  - Atualiza via `Parcela.update(id, { status: "cobrado", dataCobrancaEnviada: hoje() })`
+  - Emite `parcel:charged`
+- `arquivar(parcelaId)`:
+  - Atualiza via `Parcela.update(id, { arquivada: true })`
+  - Emite `parcel:archived`
+- `desarquivar(parcelaId)`:
+  - Atualiza via `Parcela.update(id, { arquivada: false })`
+  - Emite `parcel:unarchived`
+- `desfazerPagamento(parcelaId, estadoAnterior)`:
+  - Restaura via `desfazerStatus(estadoAnterior)`
+  - Atualiza via `Parcela.update(id, camposAtualizar)`
+  - Emite `parcel:updated`
+
+**Dependências:** M6a, M3b (overdue.rules, status.rules), M5
+
+**Critérios de conclusão:**
+- [ ] `useDashboard` retorna parcelas de hoje separadas das atrasadas
+- [ ] `useDashboard` calcula diasAtraso e cor (via overdue.rules)
+- [ ] `useDashboard` contadores refletem soma de parcelas e valores
+- [ ] `useDashboard` proximosVencimentos mostra 3 dias com parcelas após hoje
+- [ ] `useDashboard` não retorna parcelas de clientes inativos
+- [ ] `useDashboard` não retorna parcelas arquivadas
+- [ ] `marcarPago` atualiza status no backend e emite evento
+- [ ] `marcarPago` retorna função de undo que restaura estado anterior
+- [ ] `marcarParcial` com valor >= saldo → status=pago (não pago_parcial)
+- [ ] `confirmarEnvio` muda status para cobrado e emite evento
+- [ ] `arquivar` muda arquivada para true e emite evento
+- [ ] `desfazerPagamento` restaura status e valorPago do estadoAnterior
+- [ ] Nenhum hook usa setInterval
+
+**Testes antes de avançar:**
+1. Montar componente de teste com `useDashboard` + dados do seed → confirmar parcelas corretas
+2. Emitir `parcel:paid` → confirmar refaz busca
+3. Chamar `marcarPago` → confirmar status mudou no backend
+4. Chamar undo → confirmar status voltou
+5. Chamar `marcarParcial` com 100 em parcela de 200 → confirmar valorPago=100, status=pago_parcial
+6. Chamar `marcarParcial` com 200 em parcela de 200 → confirmar status=pago
+
+---
+
+### Módulo M8a: Componentes Compostos Core
+
+**Objetivo:** Implementar os 5 componentes compostos usados pelo Dashboard e Nova Cobrança.
+
+**Tarefas:**
+
+1. **`components/ChargeCard`** — o componente mais complexo
+   - Props: `{ parcela, cobranca, cliente, onSelect, onCharge, onConfirmSend, onMarkPaid, onMarkPartial, onArchive, isSelected }`
+   - Estados visuais: pendente (neutro), cobrado (amarelo), pago (verde, não renderiza no Dashboard), pago_parcial (azul), atrasado laranja, atrasado vermelho
+   - Layout: círculo de seleção (esquerda), nome + produto + parcela (centro), valor + status (direita)
+   - Menu inline ao tocar "Marcar pago": botões "Pagamento total" e "Pagamento parcial"
+   - Se "Pagamento parcial": input inline com máscara de moeda + botão confirmar
+   - Botão "Cobrar" (💬) → chama onCharge
+   - Após cobrar: botão "Confirmar envio" (✓) aparece
+   - Botão "Arquivar" no card expandido
+   - Card expande ao toque (mostra PIX, telefone, observações)
+   - Pago parcial: mostra "R$ X de R$ Y"
+   - Atrasada: mostra "Atrasada há X dias"
+
+2. **`components/ClientAutocomplete`**
+   - Props: `{ onSelect, clientes }`
+   - Input com debounce 300ms
+   - Lista de sugestões filtrada por nome
+   - "RECENTES" (5 clientes mais recentes em cobranças)
+   - Botão "+ Cadastrar novo cliente" → mini-form inline (nome, telefone)
+   - Ao selecionar cliente → chama onSelect(cliente)
+
+3. **`components/ProductAutocomplete`**
+   - Props: `{ onSelect, produtos, allowVendaAvulsa }`
+   - Input com debounce 300ms
+   - Lista filtrada por nome, ordenada por vezesUsado desc
+   - "MAIS VENDIDOS" (top 3 por vezesUsado)
+   - Botão "+ Cadastrar novo produto" → mini-form inline (nome, valor)
+   - Botão "Venda avulsa" → mostra input "O que foi vendido?" (mín 3 chars) → chama onSelect({ nome, produtoServicoId: null })
+
+4. **`components/PaymentSelector`**
+   - Props: `{ value, onChange }`
+   - 5 botões grandes: PIX, Cartão Crédito, Cartão Débito, Dinheiro, Transferência (sem boleto)
+   - Se PIX: campo "PIX utilizado" aparece inline com autocomplete (busca valores distintos de pixUtilizado)
+   - Toggle À Vista / Parcelado
+   - Se Parcelado: botões de 2 a 12, input para 13-60
+
+5. **`components/ParcelPreview`**
+   - Props: `{ valor, quantidadeParcelas, primeiroVencimento, diaVencimentoFixo }`
+   - Lista as parcelas: "1. R$ 66,67 · 15/08/2026"
+   - Recalcula em tempo real ao alterar qualquer prop
+   - Mostra soma total no rodapé
+
+**Dependências:** M7 (base), M3b (gerarParcelas para ParcelPreview, overdue.rules para ChargeCard), M5 (types)
+
+**Critérios de conclusão:**
+- [ ] ChargeCard renderiza corretamente para cada um dos 6 estados visuais
+- [ ] ChargeCard mostra "Atrasada há X dias" para atrasadas
+- [ ] ChargeCard mostra "R$ X de R$ Y" para pago_parcial
+- [ ] ChargeCard menu inline "Marcar pago" → "total" e "parcial"
+- [ ] ChargeCard input de parcial com máscara de moeda
+- [ ] ChargeCard botão "Cobrar" → chama callback
+- [ ] ChargeCard botão "Confirmar envio" aparece após cobrar
+- [ ] ChargeCard expande ao toque (mostra PIX, telefone, observações)
+- [ ] ClientAutocomplete filtra por nome com debounce
+- [ ] ClientAutocomplete mostra "RECENTES"
+- [ ] ClientAutocomplete mini-form cria cliente
+- [ ] ProductAutocomplete ordena por vezesUsado
+- [ ] ProductAutocomplete "Venda avulsa" exige 3 chars
+- [ ] PaymentSelector tem 5 opções (sem boleto)
+- [ ] PaymentSelector mostra campo PIX quando PIX selecionado
+- [ ] PaymentSelector toggle À Vista/Parcelado
+- [ ] ParcelPreview recalcula ao alterar props
+- [ ] ParcelPreview soma total no rodapé
+
+**Testes antes de avançar:**
+1. Renderizar ChargeCard com cada status → verificar visual
+2. Clicar "Marcar pago" → "total" → verificar callback
+3. Clicar "Marcar pago" → "parcial" → digitar 100 → verificar callback com valor
+4. Clicar "Cobrar" → verificar callback
+5. ClientAutocomplete: digitar "Mar" → verificar que filtra
+6. ProductAutocomplete: clicar "Venda avulsa" → digitar "ab" → verificar bloqueio (min 3)
+7. PaymentSelector: selecionar PIX → verificar campo PIX aparece
+8. ParcelPreview: 3x R$600, dia 10, primeiroVenc 15/07 → verificar 3 parcelas com datas e valores
+
+---
+
+### Módulo M11: Página Clientes
+
+**Objetivo:** Listagem, busca, edição inline e histórico de clientes.
+
+**Tarefas:**
+1. Lista de clientes com `useClients`
+2. SearchInput (filtra por nome e telefone)
+3. Card de cliente: nome, status (Ativo/Inativo), telefone formatado, contador de cobranças ativas
+4. Toque no card expande:
+   - Dados editáveis inline (nome, telefone, observações)
+   - Toggle Ativo/Inativo (com confirmação ao inativar)
+   - Histórico de cobranças (5 recentes via `useCharges`)
+   - Cada cobrança expande mostrando parcelas
+   - Botões [Editar] e [Excluir] na cobrança (se permitido por M3b)
+   - Botão [↺ Desfazer pagamento] em parcelas pagas/parciais
+5. Botão [＋ Novo] no header → mini-form inline
+6. "Ver todas as cobranças (X)" → lista paginada
+7. Reativação ao tocar no status inativo
+
+**Dependências:** M6a (useClients, useCharges), M7 (SearchInput, EmptyState)
+
+**Critérios de conclusão:**
+- [ ] Lista carrega ao montar
+- [ ] Busca filtra por nome e telefone em tempo real
+- [ ] Card expande ao toque
+- [ ] Edição inline salva ao clicar fora
+- [ ] Inativação pede confirmação e emite `client:inactivated`
+- [ ] Inativação faz parcelas sumirem do Dashboard (via evento)
+- [ ] Reativação faz parcelas voltarem
+- [ ] Histórico mostra 5 cobranças recentes
+- [ ] [Editar] só aparece se `podeEditarCobranca` (M3b) retorna true
+- [ ] [Excluir] só aparece se `podeExcluirCobranca` (M3b) retorna true
+- [ ] [↺ Desfazer pagamento] restaura via `desfazerPagamento` (M6b)
+- [ ] "Ver todas" carrega lista completa
+
+**Testes antes de avançar:**
+1. Abrir → verificar lista
+2. Buscar → verificar filtro
+3. Expandir → editar nome → clicar fora → verificar salvou
+4. Inativar → confirmar → verificar some do Dashboard
+5. Reativar → verificar volta
+6. Expandir cobrança → verificar parcelas
+7. [Editar] com todas pendentes → verificar habilitado
+8. [Excluir] sem pagamentos → verificar habilitado
+9. [↺ Desfazer pagamento] → verificar status volta
+10. [＋ Novo] → preencher → salvar → verificar na lista
+
+---
+
+### Módulo M12: Página Produtos
+
+**Objetivo:** Listagem, edição inline e criação de produtos.
+
+**Tarefas:**
+1. Lista com `useProducts` (ordenados por vezesUsado desc)
+2. Card: nome, valor padrão (ou "Sem valor"), vezes usado, ⭐ no mais usado
+3. Toque expande: edição inline (nome, valorPadrao)
+4. Botão [＋ Novo] → mini-form inline
+5. Item "Venda avulsa" no fim (agrupamento visual, count de cobranças com produtoServicoId=null, não editável)
+6. Exclusão: verifica se há cobranças referenciando. Se sim, bloqueia. Se não, permite.
+
+**Dependências:** M6a (useProducts), M7 (SearchInput, EmptyState)
+
+**Critérios de conclusão:**
+- [ ] Produtos ordenados por vezesUsado desc
+- [ ] ⭐ no produto mais usado
+- [ ] Valor padrão formatado ou "Sem valor"
+- [ ] "Usado X vezes" exibido
+- [ ] Edição inline salva
+- [ ] "Venda avulsa" aparece como agrupamento (não editável)
+- [ ] Excluir com cobranças → bloqueia
+- [ ] Excluir sem cobranças → permite
+
+**Testes antes de avançar:**
+1. Abrir → verificar ordem
+2. Expandir → editar → verificar salvou
+3. Criar novo → verificar na lista
+4. Excluir produto usado → verificar bloqueio
+5. Excluir produto não usado → verificar exclusão
+6. Verificar "Venda avulsa" no fim da lista
+
+---
+
+## Sprint 6 — Dashboard e Nova Cobrança (Passos 1+2)
 
 ### Módulo M9: Página Dashboard
 
-**Objetivo:** Implementar a tela inicial do sistema.
+**Objetivo:** A tela principal do sistema — quem cobrar hoje.
 
 **Tarefas:**
-1. Estrutura da página com useDashboard hook
-2. Header: data de hoje, contadores (cobranças, valor, atrasadas)
-3. Contador de atrasadas é toggle (filtra só atrasadas)
-4. Lista de ChargeCards (atrasadas primeiro, depois de hoje)
-5. Seção "Próximos vencimentos" (3 linhas clicáveis)
-6. SearchInput para filtro (filtra por nome, produto, telefone)
-7. BatchBar integrada com useBatchSelect
-8. EmptyState quando não há cobranças
-9. UndoToast ao marcar como pago
-10. Integração com OnboardingGuide (se sistema vazio)
+1. `useDashboard` hook (M6b) para carregar dados
+2. Cabeçalho: data de hoje formatada, contadores (total, valor, atrasadas)
+3. Lista de ChargeCards:
+   - Atrasadas primeiro (vermelhas 4+ dias, laranjas 1-3 dias)
+   - Pendentes de hoje
+   - Cobradas hoje (aguardando confirmação de pagamento)
+4. Cada ChargeCard integrado com `useParcelActions`:
+   - "Cobrar" → `gerarLinkWhatsApp` → abrir link
+   - "Confirmar envio" → `confirmarEnvio(parcelaId)`
+   - "Marcar pago" → "total" → `marcarPago` com undo toast
+   - "Marcar pago" → "parcial" → input → `marcarParcial`
+5. `useBatchSelect` (hook interno do M9, não em M6):
+   - Círculo à esquerda de cada card para seleção
+   - Ao selecionar 2+, barra fixa no rodapé: "X selecionadas · [Marcar todas como pagas]"
+   - `marcarLoteComoPago()` → chama `marcarPago` para cada uma, 1 toast de undo para todas
+6. SearchInput para filtro (nome, produto, telefone)
+7. EmptyState quando não há cobranças ("Nada para cobrar hoje. ✓ Próximo vencimento: dia XX")
+8. Seção "Próximos vencimentos" (3 linhas clicáveis)
+   - Clique abre overlay/modal listando parcelas daquele dia
+   - Não navega para outra página
+   - Fechar overlay volta ao Dashboard
+9. BatchBar (componente trivial, construído dentro do M9)
+10. UndoToast ao marcar como pago
 
-**Dependências:** M6 (hooks), M8 (componentes), M7 (componentes base)
+**Dependências:** M6b (useDashboard, useParcelActions), M8a (ChargeCard), M7 (SearchInput, EmptyState, UndoToast, DayBadge)
 
 **Critérios de conclusão:**
 - [ ] AC-01: Dashboard mostra apenas parcelas de hoje + atrasadas
@@ -525,335 +848,273 @@ Fase 8: Validação         M15
 - [ ] AC-16: Pagamento parcial com input e máscara
 - [ ] AC-17: Valor >= saldo trata como total
 - [ ] AC-18: Card parcial mostra "R$ X de R$ Y"
-- [ ] AC-19: Ação em lote funciona
+- [ ] AC-19: Ação em lote funciona (selecionar 2+, marcar todas)
 - [ ] AC-20: Undo em lote com toast único
 - [ ] AC-21: Arquivar remove do Dashboard
-- [ ] AC-22: Desarquivar volta ao Dashboard
-- [ ] Onboarding aparece quando sistema está vazio
+- [ ] AC-22: Desarquivar via histórico volta ao Dashboard
+- [ ] Clique em próximo vencimento abre overlay (não navega)
 
 **Testes antes de avançar:**
-1. Com dados de teste do M1: abrir Dashboard → verificar que parcelas corretas aparecem
-2. Clicar em "Cobrar" → verificar WhatsApp abre → clicar "Confirmar envio" → verificar card muda de cor
-3. Clicar em "Marcar pago" → "Pagamento total" → verificar card some + undo toast aparece
-4. Clicar "Desfazer" no toast → verificar card volta
-5. Clicar em "Marcar pago" → "Pagamento parcial" → digitar 100 → verificar "R$ 100 de R$ 200"
-6. Selecionar 3 cards → "Marcar todas como pagas" → verificar 3 cards somem + undo toast
-7. Digitar na busca → verificar filtro
-8. Inativar um cliente → verificar que parcelas somem do Dashboard
-9. Arquivar uma parcela → verificar que some do Dashboard
-10. Com sistema vazio (sem dados) → verificar Onboarding aparece
+1. Executar seed → abrir Dashboard → verificar parcelas corretas aparecem
+2. Clicar "Cobrar" → WhatsApp abre → "Confirmar envio" → card muda de cor
+3. "Marcar pago" → "total" → card some + undo toast → "Desfazer" → card volta
+4. "Marcar pago" → "parcial" → digitar 100 → "R$ 100 de R$ 200"
+5. Selecionar 3 cards → "Marcar todas" → 3 cards somem + 1 undo toast
+6. Digitar na busca → filtro
+7. Inativar cliente (via M11) → parcelas somem do Dashboard
+8. Arquivar parcela → some do Dashboard
+9. Clicar em próximo vencimento → overlay abre com parcelas daquele dia
+10. Sistema vazio → "Nada para cobrar hoje"
 
 ---
 
-### Módulo M10: Página Nova Cobrança
+### Módulo M10a: Nova Cobrança — Passos 1 e 2
 
-**Objetivo:** Implementar o fluxo de 4 passos para registrar vendas.
+**Objetivo:** Implementar o início do fluxo de Nova Cobrança (seleção de cliente, produto, valor e pagamento).
 
 **Tarefas:**
-1. Estado do wizard (passo atual 1-4, dados preenchidos)
+1. Estado do wizard (passo atual 1-4, dados preenchidos em state compartilhado)
 2. Barra de progresso (4 pontos)
-3. Passo 1: ClientAutocomplete + ProductAutocomplete na mesma tela
-   - Ao selecionar cliente: disparar cadastro inteligente (buscar últimas 3 cobranças, pré-preencher se padrão)
-   - Mini-form inline para novo cliente
+3. **Passo 1: Cliente + Produto**
+   - ClientAutocomplete (M8a) com `useClients`
+   - Ao selecionar cliente: disparar busca de últimas 3 cobranças para cadastro inteligente (se M10c implementado; se não, pular)
+   - Mini-form inline para novo cliente (usa `Cliente.create` via SDK)
+   - ProductAutocomplete (M8a) com `useProducts`
    - Mini-form inline para novo produto
-   - Input "Venda avulsa" quando selecionado
-4. Passo 2: Valor + PaymentSelector na mesma tela
-   - Valor pré-preenchido se produto tem valorPadrao
+   - Venda avulsa (produtoServicoId=null, nomeProdutoServico digitado)
+4. **Passo 2: Valor + Pagamento**
+   - Campo valor (pré-preenchido se produto tem valorPadrao)
+   - PaymentSelector (M8a)
    - Se PIX: campo PIX com autocomplete aparece inline
    - Toggle À Vista/Parcelado + seletor de parcelas
-5. Passo 3: DaySelector + primeiro vencimento + observações + ParcelPreview
-   - Primeiro vencimento auto-sugerido
-   - Pré-visualização recalcula em tempo real ao alterar dia fixo ou data
-6. Passo 4: Resumo + botão "Confirmar cobrança"
-   - Não é tela de revisão — mostra apenas resumo compacto + botão
-7. Tela de sucesso: "Cobrança registrada! X parcelas criadas." + [Nova cobrança] [Voltar para Hoje]
-8. Botão [✕] para cancelar (com confirmação se dados preenchidos)
-9. Navegação [Voltar] entre passos sem perder dados
+5. Botão [Continuar] no passo 2 → vai para passo 3 (M10b)
+6. Botão [✕] para cancelar (com confirmação se dados preenchidos)
+7. Botão [Voltar] do passo 2 → volta para passo 1 sem perder dados
 
-**Dependências:** M6 (hooks), M8 (componentes), M3 (domain para pré-visualização), M4 (api.service)
+**Dependências:** M8a (ClientAutocomplete, ProductAutocomplete, PaymentSelector), M6a (useClients, useProducts), M2 (backend function para criar — mas M10a não chama ainda, só M10b chama)
 
 **Critérios de conclusão:**
-- [ ] AC-23: Fluxo tem 4 passos
 - [ ] AC-24: Cliente e produto na mesma tela (passo 1)
 - [ ] AC-25: Valor e pagamento na mesma tela (passo 2)
 - [ ] AC-26: PIX aparece inline quando forma é PIX
-- [ ] AC-27: PIX obrigatório quando forma é PIX
+- [ ] AC-27: PIX obrigatório quando forma é PIX (bloqueia Continuar)
 - [ ] AC-28: Boleto não aparece (5 opções)
 - [ ] AC-29: Venda avulsa exige mínimo 3 chars
 - [ ] AC-30: Venda avulsa define produtoServicoId = null
+- [ ] AC-39: Produtos ordenados por frequência no autocomplete
+- [ ] AC-40: Recentes mostra 5 clientes mais recentes
+- [ ] AC-41: Valor >0 e <=999999.99 (bloqueia Continuar se inválido)
+- [ ] AC-42: Parcelas entre 1 e 60 (bloqueia se >60)
+- [ ] [✕] cancela com confirmação se há dados
+- [ ] [Voltar] do passo 2 para 1 não perde dados
+
+**Testes antes de avançar:**
+1. Selecionar cliente existente → selecionar produto → verificar valor pré-preenchido
+2. Cadastrar novo cliente inline → verificar criado e selecionado
+3. Venda avulsa com 2 chars → verificar bloqueio
+4. Selecionar PIX sem preencher chave → verificar bloqueio no Continuar
+5. Valor = 0 → verificar bloqueio
+6. Cancelar no meio → confirmar → verificar volta
+7. Voltar do passo 2 → verificar dados preservados
+
+---
+
+## Sprint 7 — Nova Cobrança (Passos 3+4)
+
+### Módulo M10b: Nova Cobrança — Passos 3, 4 e Sucesso
+
+**Objetivo:** Concluir o fluxo de Nova Cobrança com vencimento, pré-visualização, confirmação e tela de sucesso.
+
+**Tarefas:**
+1. **Passo 3: Vencimento + Observações + Pré-visualização**
+   - DaySelector (6 botões grandes para [5, 10, 15, 20, 25, 30])
+   - Campo "Primeiro vencimento" auto-sugerido via `calcularPrimeiroVencimentoSugerido` (M3b). Editável.
+   - Se dia fixo = hoje → sugere hoje
+   - Campo "Observações" (opcional, textarea)
+   - ParcelPreview (M8a) — recalcula em tempo real
+   - Botão [Continuar] → passo 4
+2. **Passo 4: Resumo + Confirmar**
+   - Resumo compacto: cliente, produto, valor, forma, parcelas, vencimento
+   - NÃO é tela de revisão — é só um resumo + botão
+   - Botão "Confirmar cobrança" → chama backend function `createCobranca` via `callBase44BackendFunction` ou SDK
+   - Se backend retorna erro: wizard permanece no passo 4 com toast "Erro ao registrar cobrança. [Tentar novamente]". Dados não perdidos.
+   - Se sucesso: vai para tela de sucesso
+3. **Tela de Sucesso**
+   - "✓ Cobrança registrada! X parcelas criadas."
+   - [Nova cobrança] → limpa wizard, volta ao passo 1, mantém último cliente como sugestão
+   - [Voltar para Hoje] → navega para Dashboard
+   - Emite evento `charge:created`
+4. Botão [Voltar] entre passos 3↔2, 4↔3 sem perder dados
+
+**Dependências:** M10a, M8a (ParcelPreview), M3b (calcularPrimeiroVencimentoSugerido), M2 (backend function)
+
+**Critérios de conclusão:**
 - [ ] AC-31: Primeiro vencimento sugerido automaticamente
 - [ ] AC-32: Se dia fixo = hoje, sugere hoje
 - [ ] AC-33: Pré-visualização aparece inclusive para 1 parcela
 - [ ] AC-34: Pré-visualização recalcula ao alterar dia fixo ou data
-- [ ] AC-35: Sem tela de revisão separada
+- [ ] AC-35: Sem tela de revisão separada (passo 4 é resumo compacto + botão)
 - [ ] AC-36: Sucesso oferece "Nova cobrança" e "Voltar para Hoje"
-- [ ] AC-37: Cadastro inteligente pré-preenche para cliente com 2+ cobranças com padrão
-- [ ] AC-38: Sem sugestão para cliente novo ou com 1 cobrança
-- [ ] AC-39: Produtos ordenados por frequência
-- [ ] AC-40: Recentes mostra 5 clientes mais recentes
-- [ ] AC-41: Valor >0 e <=999999.99
-- [ ] AC-42: Parcelas entre 1 e 60
-- [ ] Botão [✕] cancela com confirmação se há dados
+- [ ] AC-43: Fluxo completo cria cobrança + parcelas no backend
+- [ ] AC-44: Após salvar, emite `charge:created`
+- [ ] [Nova cobrança] limpa wizard e volta ao passo 1
 - [ ] [Voltar] entre passos não perde dados
-- [ ] Após salvar, chama backend function createCobranca
-- [ ] Após salvar, emite evento charge:created
-- [ ] [Nova cobrança] limpa o wizard e volta ao passo 1
+- [ ] Erro do backend → toast de erro, dados preservados, wizard permanece
 
 **Testes antes de avançar:**
-1. Fluxo completo com cliente existente, produto existente, à vista, PIX → verificar cobranca + 1 parcela criadas
-2. Fluxo com cliente novo (cadastrar inline) → verificar cliente criado e cobranca vinculada
-3. Fluxo com venda avulsa (sem produto) → verificar nomeProdutoServico preenchido, produtoServicoId = null
-4. Fluxo parcelado 10x → verificar 10 parcelas criadas com datas corretas
-5. Selecionar cliente com 3 cobranças anteriores usando mesmo PIX → verificar PIX pré-preenchido
-6. Selecionar cliente novo → verificar que nada é pré-preenchido
-7. Tentar avançar passo 2 sem preencher PIX (forma = PIX) → verificar bloqueio
-8. Tentar avançar com valor = 0 → verificar bloqueio
-9. Alterar dia fixo no passo 3 → verificar pré-visualização recalcula
-10. Salvar → verificar tela de sucesso → clicar "Nova cobrança" → verificar wizard limpo
-11. Cancelar no meio → verificar confirmação → confirmar → verificar volta ao Dashboard
-12. Voltar do passo 3 para o 1 → verificar dados preservados
+1. Fluxo completo: cliente + produto + à vista + PIX + dia 10 + confirmar → verificar cobranca + 1 parcela criadas
+2. Fluxo parcelado 10x → verificar 10 parcelas criadas com datas corretas
+3. Alterar dia fixo no passo 3 → verificar pré-visualização recalcula
+4. Salvar → sucesso → "Nova cobrança" → wizard limpo no passo 1
+5. Salvar → sucesso → "Voltar para Hoje" → Dashboard com nova parcela
+6. Simular erro do backend → verificar toast, dados preservados
+7. Voltar do passo 3 para 1 → dados preservados
 
 ---
 
-### Módulo M11: Página Clientes
+## Sprint 8 — Integração
 
-**Objetivo:** Implementar listagem, busca, edição inline e histórico de clientes.
+### Módulo M14: Integração, Navegação, Onboarding e Edição
 
-**Tarefas:**
-1. Lista de clientes com useClients hook
-2. SearchInput (filtra por nome e telefone)
-3. Card de cliente: nome, status (Ativo/Inativo), telefone formatado, contador de cobranças ativas
-4. Toque no card expande:
-   - Dados editáveis inline (nome, telefone, observações)
-   - Toggle Ativo/Inativo (com confirmação ao inativar)
-   - Histórico de cobranças (5 recentes via useCharges)
-   - Cada cobrança expande mostrando parcelas
-   - Botões [Editar] e [Excluir] na cobrança (se permitido)
-   - Botão [↺ Desfazer pagamento] em parcelas pagas
-5. Botão [＋ Novo] no header → mini-form inline
-6. "Ver todas as cobranças (X)" → lista paginada completa
-7. Reativação de cliente inativo ao tocar no status
-
-**Dependências:** M6 (hooks), M7 (componentes base), M4 (api.service)
-
-**Critérios de conclusão:**
-- [ ] Lista carrega clientes ao montar
-- [ ] Busca filtra por nome e telefone em tempo real
-- [ ] Card expande ao toque mostrando dados editáveis
-- [ ] Edição inline salva ao clicar fora ou em botão
-- [ ] Inativação pede confirmação
-- [ ] Inativação faz parcelas sumirem do Dashboard (verificar via evento)
-- [ ] Reativação faz parcelas voltarem ao Dashboard
-- [ ] Histórico mostra 5 cobranças recentes
-- [ ] Cada cobrança no histórico expande mostrando parcelas
-- [ ] [Editar] só aparece se todas parcelas têm status=pendente
-- [ ] [Excluir] só aparece se nenhuma parcela foi paga/parcial
-- [ ] [↺ Desfazer pagamento] aparece em parcelas pagas ou parciais
-- [ ] Desfazer pagamento restaura status e campos
-- [ ] "Ver todas" carrega lista completa paginada
-- [ ] Novo cliente cria via mini-form inline
-
-**Testes antes de avançar:**
-1. Abrir página → verificar lista de clientes
-2. Digitar na busca → verificar filtro
-3. Expandir cliente → editar nome → clicar fora → verificar salvou
-4. Inativar cliente → confirmar → verificar que some do Dashboard
-5. Reativar cliente → verificar que volta ao Dashboard
-6. Expandir cliente → expandir cobrança → verificar parcelas
-7. Clicar [Editar] em cobrança com todas pendentes → verificar abre fluxo de edição
-8. Clicar [Excluir] em cobrança sem pagamentos → confirmar → verificar excluiu
-9. Clicar [↺ Desfazer pagamento] → confirmar → verificar status voltou
-10. Tentar excluir cobrança com parcela paga → verificar botão não aparece
-11. Clicar "Ver todas" → verificar lista completa
-12. Clicar [＋ Novo] → preencher → salvar → verificar cliente na lista
-
----
-
-### Módulo M12: Página Produtos
-
-**Objetivo:** Implementar listagem, edição inline e criação de produtos.
+**Objetivo:** Conectar todas as páginas, implementar navegação, onboarding de primeiro acesso, e fluxo de edição de cobrança.
 
 **Tarefas:**
-1. Lista de produtos com useProducts hook (ordenados por vezesUsado)
-2. Card de produto: nome, valor padrão (ou "Sem valor"), vezes usado
-3. Toque no card expande: edição inline (nome, valorPadrao)
-4. Botão [＋ Novo] no header → mini-form inline
-5. Item "Venda avulsa" no fim da lista (agrupamento visual, não editável)
-6. Tentativa de exclusão: verifica se há cobranças referenciando
-7. Exclusão permitida → deleta produto
-8. Exclusão não permitida → mostra mensagem
 
-**Dependências:** M6 (hooks), M7 (componentes base), M4 (api.service)
+**14a. Navegação**
+1. Barra de navegação inferior (mobile-first): [🏠 Hoje] [➕ Nova] [👥 Clientes] [📦 Produtos] [⚙️]
+2. Rotas: `/` → Dashboard, `/nova` → Nova Cobrança, `/clientes` → Clientes, `/produtos` → Produtos, `/config` → Settings
+3. Navegação entre páginas sem recarregar (SPA)
+4. EventBus funciona entre trocas de página (eventos de uma página invalidam cache de outra)
 
-**Critérios de conclusão:**
-- [ ] Produtos ordenados por vezesUsado (descendente)
-- [ ] Produto mais usado tem ⭐ no card
-- [ ] Valor padrão formatado como moeda ou "Sem valor"
-- [ ] Contador "Usado X vezes" exibido
-- [ ] Edição inline salva nome e valorPadrao
-- [ ] Novo produto criado aparece no topo (vezesUsado=0, mas novo)
-- [ ] "Venda avulsa" aparece como agrupamento (count de cobranças com produtoServicoId=null)
-- [ ] "Venda avulsa" não é editável nem excluível
-- [ ] Excluir produto com cobranças → bloqueia com mensagem
-- [ ] Excluir produto sem cobranças → permite
+**14b. Onboarding**
+1. Detectar sistema vazio: 0 clientes E 0 produtos E 0 cobranças
+2. Se vazio, Dashboard mostra OnboardingGuide:
+   - "Bem-vinda! Vamos começar?"
+   - 3 botões: [👥 Cadastrar clientes] [📦 Cadastrar serviços] [➕ Nova cobrança]
+   - Botão 1 com ✓ após 1+ clientes. Botão 2 com ✓ após 1+ produtos. Botão 3 destacado quando 1 e 2 têm ✓.
+   - Onboarding desaparece quando a primeira cobrança é criada
+3. OnboardingGuide é um componente simples construído aqui (não em M8)
 
-**Testes antes de avançar:**
-1. Abrir página → verificar ordem por vezesUsado
-2. Expandir produto → editar valor → verificar salvou
-3. Criar novo produto → verificar aparece na lista
-4. Tentar excluir produto usado em cobrança → verificar bloqueio
-5. Criar produto sem cobranças → excluir → verificar sucesso
-6. Verificar "Venda avulsa" mostra contagem correta
+**14c. Edição de Cobrança**
+1. M10 (Nova Cobrança) recebe props opcionais: `editMode: boolean`, `cobrancaId: string`
+2. Se `editMode = true`:
+   - Passo 1: cliente e produto como somente leitura (não editáveis em cobrança existente)
+   - Passo 2 e 3: editáveis se `podeEditarCobranca` (M3b) retorna true
+   - Se não pode editar (parcela paga): apenas observações e PIX são editáveis
+   - Botão final diz "Salvar alterações" (não "Confirmar cobrança")
+   - Ao salvar: chama backend function `editarCobranca` (M2b), não `createCobranca`
+   - Emite `charge:updated`
+3. Acesso à edição: botão [Editar] no card de cobrança no histórico do cliente (M11)
 
----
+**14d. Exclusão de Cobrança**
+1. Botão [Excluir] no card de cobrança no histórico (M11), se `podeExcluirCobranca` (M3b)
+2. Confirmação: "Excluir cobrança de [cliente]? Todas as parcelas serão deletadas."
+3. Excluir: deletar todas as parcelas, depois deletar cobrança
+4. Se produtoServicoId != null: decrementar vezesUsado
+5. Emite `charge:deleted`
 
-### Módulo M13: Página Settings
-
-**Objetivo:** Implementar configuração de dias trabalhados.
-
-**Tarefas:**
-1. Carregar useConfig hook
-2. 7 checkboxes (Dom a Sáb)
-3. Botão [Salvar]
-4. Texto explicativo
-
-**Dependências:** M6 (useConfig), M7 (componentes base)
+**Dependências:** M9, M10b, M11, M12, M13, M2b
 
 **Critérios de conclusão:**
-- [ ] Carrega dias trabalhados atuais
-- [ ] Default [1,2,3,4,5] se não existe
-- [ ] Salvar persiste na entity Configuracao
-- [ ] Checkboxes toggle corretamente
-
-**Testes antes de avançar:**
-1. Abrir Settings → verificar defaults
-2. Desmarcar Segunda → Salvar → recarregar → verificar persistido
-3. Remover registro de Configuracao → reabrir → verificar que recria com defaults
-
----
-
-## Fase 7 — Integração
-
-### Módulo M14: Navegação, Onboarding e Wiring
-
-**Objetivo:** Conectar todas as páginas, implementar navegação, onboarding e ajustes finais.
-
-**Tarefas:**
-1. Barra de navegação fixa: [🏠 Hoje] [➕ Nova] [👥 Clientes] [📦 Serviços] [⚙️]
-2. Roteamento entre páginas
-3. [➕ Nova] é o maior e mais destacado
-4. Detecção de primeiro acesso (0 clientes AND 0 produtos AND 0 cobranças)
-5. OnboardingGuide no Dashboard quando vazio
-6. Onboarding desaparece quando primeira cobrança é criada
-7. Verificar que EventBus eventos fluem entre páginas (ex: criar cobrança em Nova → Dashboard atualiza)
-8. Fluxo de edição de cobrança: abre M10 com campos pré-preenchidos, título "Editar Cobrança", botão "Salvar alterações"
-9. Fluxo de exclusão: confirmação + exclusão + decrementar vezesUsado
-10. Responsividade: testar em mobile e desktop
-
-**Dependências:** M9, M10, M11, M12, M13 (todas as páginas)
-
-**Critérios de conclusão:**
-- [ ] Barra de navegação fixa com 5 itens
-- [ ] [➕ Nova] é visualmente o maior
-- [ ] Página inicial é sempre Dashboard
-- [ ] Navegação entre páginas funciona
+- [ ] Navegação entre todas as 5 páginas funciona
+- [ ] EventBus propaga eventos entre páginas (criar cobrança em /nova invalida Dashboard em /)
 - [ ] Onboarding aparece quando sistema vazio
 - [ ] Onboarding desaparece após primeira cobrança
-- [ ] Criar cobrança → voltar ao Dashboard → parcelas aparecem (via EventBus)
-- [ ] Marcar como pago no Dashboard → ir em Clientes → histórico atualizado
-- [ ] Editar cobrança via Clientes → voltar → Dashboard reflete mudança
-- [ ] Excluir cobrança → Dashboard atualiza
-- [ ] Layout responsivo em mobile (375px) e desktop (1280px)
-- [ ] Card expandido funciona em mobile (scroll vertical, sem overflow horizontal)
+- [ ] Edição: M10 em editMode mostra cliente/produto como somente leitura
+- [ ] Edição: se parcela paga, apenas observações/PIX editáveis
+- [ ] Edição: "Salvar alterações" chama editarCobranca (M2b)
+- [ ] Edição: parcelas são regeneradas se todas pendentes
+- [ ] Exclusão: deleta cobrança + parcelas
+- [ ] Exclusão: decrementa vezesUsado do produto
+- [ ] Exclusão: bloqueia se parcela paga
+- [ ] [Editar] no histórico do cliente abre M10 em editMode
 
 **Testes antes de avançar:**
-1. Sistema vazio → abrir → verificar Onboarding
-2. Cadastrar cliente via Onboarding → verificar ✓ no botão 1
-3. Cadastrar produto via Onboarding → verificar ✓ no botão 2
-4. Criar cobrança via Onboarding → verificar Onboarding desaparece
-5. Navegar entre todas as 5 páginas → verificar que não quebra
-6. Criar cobrança → ir ao Dashboard → verificar que aparece
-7. Marcar pago no Dashboard → ir em Clientes → verificar histórico atualizado
-8. Ir em Clientes → editar cobrança → salvar → voltar ao Dashboard → verificar mudança
-9. Abrir em mobile (DevTools 375px) → verificar que todos os elementos são usáveis
-10. Abrir em desktop → verificar layout
+1. Navegar entre todas as páginas → verificar que não recarrega
+2. Criar cobrança em /nova → ir para / → verificar que Dashboard atualizou
+3. Sistema vazio → onboarding aparece → cadastrar 1 cliente → ✓ no botão 1
+4. Cadastrar 1 produto → ✓ no botão 2
+5. Criar cobrança → onboarding desaparece
+6. [Editar] cobrança com todas pendentes → alterar para 5x → salvar → verificar 5 parcelas
+7. [Editar] cobrança com parcela paga → verificar que valor/parcelas não são editáveis
+8. [Excluir] cobrança sem pagamentos → confirmar → verificar deletada
+9. [Excluir] cobrança com parcela paga → verificar bloqueado
+10. Verificar que vezesUsado decrementou após exclusão
 
 ---
 
-## Fase 8 — Validação Final
+## Sprint 9 — Validação E2E
 
-### Módulo M15: Testes de Integração E2E
+### Módulo M15: Validação End-to-End
 
-**Objetivo:** Validar que o sistema completo atende a todos os critérios de aceitação do PRD v2.0.
+**Objetivo:** Validar o sistema completo simulando uso real.
 
-**Tarefas:**
-1. Limpar todos os dados de teste
-2. Executar cenários de teste E2E (simulação de uso real)
-3. Validar todos os critérios de aceitação (AC-01 a AC-61)
-4. Testar casos especiais (seção 10 do PRD)
-5. Testar edge cases
+**Pré-requisito:** Executar `seed-test-data.ts` para resetar dados.
 
-**Dependências:** M14 (sistema completo)
-
-**Cenários de teste E2E:**
+**Cenários:**
 
 **Cenário 1 — Primeiro acesso e migração:**
 - [ ] Sistema vazio → Onboarding aparece
-- [ ] Cadastrar 5 clientes via Onboarding
-- [ ] Cadastrar 3 produtos via Onboarding
+- [ ] Cadastrar 5 clientes
+- [ ] Cadastrar 3 produtos
 - [ ] Criar 5 cobranças (à vista, 3x, 10x, avulsa, dinheiro)
 - [ ] Onboarding desaparece
 - [ ] Dashboard mostra parcelas corretas
 
 **Cenário 2 — Dia de cobrança:**
-- [ ] Abrir Dashboard → ver parcelas de hoje
-- [ ] Clicar Cobrar → WhatsApp abre com mensagem correta
+- [ ] Dashboard mostra parcelas de hoje
+- [ ] Cobrar → WhatsApp abre com mensagem correta
 - [ ] Confirmar envio → card muda de cor
-- [ ] Marcar como pago (total) → card some + undo toast
+- [ ] Marcar pago (total) → card some + undo toast
 - [ ] Desfazer → card volta
-- [ ] Marcar como pago (parcial) → card mostra "R$ X de R$ Y"
-- [ ] Selecionar 3 cards → marcar lote → 3 cards somem
-- [ ] Pesquisar por nome → lista filtra
+- [ ] Marcar pago (parcial) → "R$ X de R$ Y"
+- [ ] Selecionar 3 → marcar lote → 3 somem
+- [ ] Pesquisar por nome → filtro
 
 **Cenário 3 — Atrasadas:**
-- [ ] Criar parcela com vencimento 10 dias atrás → aparece vermelha "Atrasada há 10 dias"
-- [ ] Criar parcela com vencimento 2 dias atrás → aparece laranja "Atrasada há 2 dias"
-- [ ] Cobrar atrasada → mensagem diz "venceu no dia" (passado)
+- [ ] Atrasada 10 dias → vermelha "Atrasada há 10 dias"
+- [ ] Atrasada 2 dias → laranja "Atrasada há 2 dias"
+- [ ] Cobrar atrasada → mensagem diz "venceu no dia"
 - [ ] Confirmar envio → card muda de vermelho/laranja para amarelo
-- [ ] Arquivar atrasada → card some do Dashboard
-- [ ] Desarquivar via histórico → volta ao Dashboard
+- [ ] Arquivar → some do Dashboard
+- [ ] Desarquivar via histórico → volta
 
 **Cenário 4 — Pagamento parcial:**
-- [ ] Marcar parcial de R$ 100 em parcela de R$ 200 → "R$ 100 de R$ 200 (pago parcial)"
-- [ ] Cobrar parcela parcial → mensagem menciona "R$ 100 pendentes"
-- [ ] Complementar com R$ 100 → status = pago, card some
-- [ ] Desfazer complemento → volta para pago_parcial com valorPago anterior
+- [ ] Marcar R$ 100 em parcela de R$ 200 → "R$ 100 de R$ 200 (pago parcial)"
+- [ ] Cobrar parcial → mensagem menciona "R$ 100 pendentes"
+- [ ] Complementar R$ 100 → status=pago, card some
+- [ ] Desfazer complemento → volta para pago_parcial com valorPago=100
 
 **Cenário 5 — Edição e exclusão:**
-- [ ] Editar cobrança com todas parcelas pendentes → regenera parcelas
-- [ ] Editar cobrança com parcela cobrada → só permite observações/PIX
-- [ ] Excluir cobrança sem pagamentos → deleta cobrança + parcelas
-- [ ] Excluir cobrança com parcela paga → bloqueia
-- [ ] Excluir produto usado em cobrança → bloqueia
+- [ ] Editar cobrança com todas pendentes → regenera parcelas
+- [ ] Editar com parcela cobrada → permite (cobrado != pago)
+- [ ] Editar com parcela paga → só observações/PIX
+- [ ] Excluir sem pagamentos → deleta cobrança + parcelas
+- [ ] Excluir com parcela paga → bloqueia
+- [ ] Excluir produto usado → bloqueia
 
 **Cenário 6 — Cliente inativo:**
-- [ ] Inativar cliente → parcelas somem do Dashboard
-- [ ] Histórico do cliente inativo é acessível
-- [ ] Reativar cliente → parcelas voltam ao Dashboard
+- [ ] Inativar → parcelas somem do Dashboard
+- [ ] Histórico do inativo acessível
+- [ ] Reativar → parcelas voltam
 
 **Cenário 7 — Casos especiais:**
-- [ ] Fevereiro com dia 30 → parcela vence 28/02 (ou 29 em bissexto)
-- [ ] Abril com dia 31 → parcela vence 30/04
+- [ ] Fevereiro dia 30 → 28/02 (ou 29 em bissexto)
+- [ ] Abril dia 31 → 30/04
 - [ ] Cliente com cobranças em dias diferentes → ambos aparecem no dia correto
-- [ ] Produto excluído (se possível forçar) → cobrança mantém nomeProdutoServico
-- [ ] PIX sem chave na forma PIX → bloqueio no cadastro
-- [ ] Venda avulsa com <3 chars → bloqueio
+- [ ] PIX sem chave na forma PIX → bloqueio
+- [ ] Venda avulsa <3 chars → bloqueio
 
 **Cenário 8 — Performance:**
 - [ ] Dashboard carrega em <2s com 50 parcelas
 - [ ] Busca responde em <300ms
-- [ ] Marcar como pago responde em <500ms (ação otimista)
+- [ ] Marcar pago responde em <500ms
 - [ ] Não há polling ou setInterval em nenhuma página
+
+**Cenário 9 — Cadastro inteligente (se M10c implementado):**
+- [ ] Criar 3 cobranças para mesmo cliente com mesmo PIX
+- [ ] Abrir Nova Cobrança, selecionar esse cliente → PIX pré-preenchido
+- [ ] Selecionar cliente novo → nada pré-preenchido
 
 **Checklist final de critérios de aceitação:**
 
@@ -870,77 +1131,32 @@ Fase 8: Validação         M15
 
 ---
 
-## Matriz de Dependências
+## Sprint 10 — Cadastro Inteligente (Opcional, Pós-MVP)
 
-```
-M1 ──────────────────┬────── M2
-                     │
-M3 ──────────────────┼────── M5
-                     │        │
-                     └────── M4
-                               │
-                               └────── M6
-                                        │
-M7 ──────────────────────────────────────┤
-                                        │
-M8 ──────────────────────────────────────┤
-                                        │
-                    M9 ─ M10 ─ M11 ─ M12 ─ M13
-                                        │
-                                        └────── M14
-                                                 │
-                                                 └────── M15
-```
+### Módulo M10c: Cadastro Inteligente
 
-| Módulo | Depende de | Bloqueia |
-|---|---|---|
-| M1 | — | M2, M4 |
-| M2 | M1 | M4, M10 |
-| M3 | — | M4, M5, M8, M10 |
-| M4 | M1, M3, M5 | M6 |
-| M5 | M3 | M4, M6, M7, M8 |
-| M6 | M4, M5 | M9, M10, M11, M12, M13 |
-| M7 | M5, M3 | M8 |
-| M8 | M7, M5, M3 | M9, M10 |
-| M9 | M6, M8, M7 | M14 |
-| M10 | M6, M8, M3, M4 | M14 |
-| M11 | M6, M7, M4 | M14 |
-| M12 | M6, M7, M4 | M14 |
-| M13 | M6, M7 | M14 |
-| M14 | M9, M10, M11, M12, M13 | M15 |
-| M15 | M14 | — |
+**Objetivo:** Pré-preencher campos da Nova Cobrança baseado no histórico do cliente.
 
----
+**Tarefas:**
+1. Ao selecionar cliente no passo 1 do wizard, buscar últimas 3 cobranças via `useCharges`
+2. Se 2+ cobranças usaram o mesmo produto → marcar como "Sugerido" no autocomplete
+3. Se 2+ cobranças usaram o mesmo PIX → pré-preencher campo PIX
+4. Se 2+ cobranças usaram a mesma quantidade de parcelas → pré-selecionar se usuário escolher "Parcelado"
+5. Se cliente tem 0 ou 1 cobrança → nenhuma sugestão
+6. Autocomplete de PIX: busca valores distintos de pixUtilizado em todas as cobranças com formaPagamento=pix. Ordenado por frequência. Máximo 5 sugestões.
 
-## Ordem Otimizada de Desenvolvimento (Paralelo Onde Possível)
+**Dependências:** M14 (sistema funcional)
 
-```
-Sprint 1: M1 + M3 + M5 (paralelizáveis — não dependem entre si)
-Sprint 2: M2 (depende de M1)
-Sprint 3: M4 (depende de M1, M3, M5)
-Sprint 4: M6 + M7 (paralelizáveis — M6 depende de M4/M5, M7 depende de M5/M3)
-Sprint 5: M8 (depende de M7)
-Sprint 6: M9 + M10 (paralelizáveis — dependem de M6/M8)
-Sprint 7: M11 + M12 + M13 (paralelizáveis — dependem de M6/M7)
-Sprint 8: M14 (depende de todas as páginas)
-Sprint 9: M15 (validação final)
-```
+**Critérios de conclusão:**
+- [ ] AC-37: Pré-preenche para cliente com 2+ cobranças com padrão
+- [ ] AC-38: Sem sugestão para cliente novo ou com 1 cobrança
+- [ ] Autocomplete PIX mostra até 5 sugestões ordenadas por frequência
+- [ ] Usuária pode alterar qualquer sugestão
 
-**Estimativa por sprint:** 1-3 dias dependendo do módulo. Total: ~15-20 dias úteis para 1 desenvolvedor.
-
----
-
-## Riscos e Mitigações
-
-| Risco | Probabilidade | Impacto | Mitigação |
-|---|---|---|---|
-| Backend function de createCobranca não atômica | Média | Alto | M2 tem teste de compensação obrigatório antes de avançar |
-| EventBus não propaga entre páginas | Baixa | Alto | M14 valida explicitamente que eventos fluem entre páginas |
-| Performance do Dashboard com muitas parcelas | Baixa | Médio | M15 cenário 8 valida com 50 parcelas |
-| Fuso horário quebrando cálculo de "hoje" | Média | Alto | M3 define hoje() em America/Sao_Paulo, M15 valida |
-| Meses curtos (fevereiro) gerando datas inválidas | Alta | Alto | M3 tem testes específicos para fev bissexto e não bissexto |
-| Edição de cobrança perdendo dados | Baixa | Alto | M10 testa voltar entre passos sem perder dados |
-| UX em mobile com cards expansíveis | Média | Médio | M14 testa em 375px |
+**Testes:**
+1. Criar 3 cobranças para mesmo cliente com mesmo PIX → abrir Nova Cobrança → selecionar cliente → PIX pré-preenchido
+2. Selecionar cliente com 1 cobrança → sem sugestões
+3. Verificar autocomplete PIX mostra valores usados anteriormente
 
 ---
 
@@ -953,10 +1169,60 @@ Um módulo **não pode avançar** para a próxima fase se:
 3. ❌ Há console.error ou console.warn em operação normal
 4. ❌ Há setInterval ou polling em qualquer arquivo
 5. ❌ Há referência a `boleto` no enum de pagamento
-6. ❌ Há referência ao campo `parcelado` (removido na v2.0)
+6. ❌ Há referência ao campo `parcelado` (removido no PRD v2.0)
 7. ❌ Há referência a `dataLimite` (regra de atraso simplificada)
 8. ❌ Valores monetários não estão em reais com 2 casas decimais
 9. ❌ Datas não estão em YYYY-MM-DD sem hora
+10. ❌ M2 ou M2b divergem de M3a nos testes de arredondamento ou datas (duplicação consciente desalinhada)
+
+---
+
+## Riscos e Mitigações
+
+| Risco | Prob | Impacto | Mitigação |
+|---|---|---|---|
+| Backend function sem transação ACID | Média | Alto | M2 e M2b usam criar-antes-de-deletar + compensação best-effort |
+| Enum validation não funciona no schema Base44 | Média | Médio | M1 testa. Se não funciona, validação em código no M2 e M3b |
+| vezesUsado cross-entity update falha com RLS | Média | Médio | M2 usa `asServiceRole` para o update |
+| diasTrabalhados como array não persiste | Baixa | Baixo | M1 testa. Fallback para string com conversão no hook |
+| EventBus não propaga entre páginas | Baixa | Alto | M14 valida explicitamente |
+| Fuso horário quebrando "hoje" | Média | Alto | M3a define hoje() em America/Sao_Paulo, M15 valida |
+| Meses curtos gerando datas inválidas | Alta | Alto | M3a e M2 têm testes específicos para fev bissexto e não bissexto |
+| Divergência entre M2 (backend) e M3a (frontend) | Média | Alto | Mesmos testes. Critério de não-avanço exige revalidação |
+| Edição de cobrança perdendo parcelas | Baixa | Alto | M2b cria novas antes de deletar antigas |
+| UX em mobile com cards expansíveis | Média | Médio | M15 testa em 375px |
+
+---
+
+## Validação Final
+
+### Existe alguma inconsistência restante?
+
+**Não.** Todas as dependências circulares foram resolvidas (M5 antes de M3). Não há critérios duplicados entre módulos (testes de M6b são unitários, M9 são de integração). As duplicações conscientes (M2↔M3a, M2b↔M3a) são explicitamente documentadas com testes compartilhados.
+
+### Existe algum risco crítico aberto?
+
+**Dois riscos com probabilidade média que precisam de validação no Sprint 1:**
+1. Se Base44 não valida enums no schema → fallback em código (M2 e M3b validam em validação)
+2. Se diasTrabalhados não persiste como array → fallback para string (já implementado no plano)
+
+Ambos têm mitigação definida e são testados no M1 antes de qualquer outro módulo começar. Nenhum risco é crítico o suficiente para bloquear o início da implementação.
+
+### Existe alguma decisão técnica pendente?
+
+**Uma decisão menor:** se `callBase44BackendFunction` (SDK do Superagent) ou o SDK da app (via `import { functions } from '@/api/functions'`) é usado para chamar a backend function a partir do frontend. Ambos funcionam. A decisão pode ser tomada no Sprint 6 (M10b) quando a integração é implementada, sem afetar módulos anteriores.
+
+### O plano está pronto para iniciar a implementação sem ambiguidades?
+
+**Sim.** Cada módulo tem:
+- Objetivo claro
+- Tarefas enumeradas
+- Dependências explícitas
+- Critérios de conclusão verificáveis (checkbox)
+- Testes obrigatórios antes de avançar
+- Referência direta ao PRD v2.0 quando aplicável
+
+A ordem dos sprints respeita todas as dependências. O caminho crítico (M1 → M3a → M3b → M6b → M9 → M14 → M15) tem 9 sprints, ~16 dias úteis. O MVP é funcional ao final do Sprint 9. O Sprint 10 (cadastro inteligente) é opcional.
 
 ---
 
