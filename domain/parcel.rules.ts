@@ -30,17 +30,22 @@ export function gerarParcelas(input: CobrancaInput): ParcelaInput[] {
 
 /**
  * Verifica se uma cobrança pode ser editada com regeneração de parcelas.
- * REGRA (Plano v2.0): true se todas as parcelas têm status=pendente OU cobrado.
- * NOTA: O PRD v2.0 seção 7.5 diz apenas pendente, mas o Plano v2.0 permite cobrado.
- * Esta implementação segue o Plano v2.0 (aprovado). Pendente de confirmação definitiva.
+ * REGRA (PRD v2.0 seção 7.5 — prevalece sobre o Plano v2.0):
+ * true APENAS se TODAS as parcelas têm status = "pendente".
+ * Se qualquer parcela tem status != "pendente" (cobrado, pago, pago_parcial),
+ * a edição é limitada a observacoes e pixUtilizado.
+ *
+ * DIVERGÊNCIA REGISTRADA: O Plano v2.0 permitia cobrado, mas o PRD v2.0
+ * diz que cobrado bloqueia a regeneração. Implementação segue o PRD.
  */
 export function podeEditarCobranca(parcelas: Parcela[]): boolean {
-  return parcelas.every(p => p.status === 'pendente' || p.status === 'cobrado');
+  return parcelas.length > 0 && parcelas.every(p => p.status === 'pendente');
 }
 
 /**
  * Verifica se uma cobrança pode ser excluída.
- * REGRA: true se nenhuma parcela tem status=pago, status=pago_parcial, ou valorPago != null.
+ * REGRA (PRD v2.0 seção 7.5): true se nenhuma parcela tem status=pago,
+ * status=pago_parcial, ou valorPago != null.
  * Parcelas com status=cobrado ou arquivado NÃO bloqueiam a exclusão.
  */
 export function podeExcluirCobranca(parcelas: Parcela[]): boolean {

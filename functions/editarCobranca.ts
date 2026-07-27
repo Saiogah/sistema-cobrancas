@@ -1,7 +1,15 @@
 // functions/editarCobranca.ts — Backend function: edita cobrança, regenera parcelas quando permitido (M2b)
 //
+// CORREÇÃO DE BUG: list() retorna array vazio no backend SDK. Solução: receber parcelasAtuaisIds
+// do frontend (que já os possui via hook useCharges) e usar get(id) + delete(id) individualmente.
+//
 // Estratégia criar-antes-de-deletar: se criar novas parcelas falha, as antigas continuam existindo.
 // Duplicação consciente de M3a (mesmas funções de createCobranca.ts).
+//
+// REGRA DE EDIÇÃO (PRD v2.0 seção 7.5 — prevalece sobre o Plano v2.0):
+// - Regeneração permitida APENAS se TODAS as parcelas têm status = "pendente"
+// - Se qualquer parcela tem status != "pendente" (cobrado, pago, pago_parcial):
+//   apenas observacoes e pixUtilizado podem ser editados
 
 import { createClientFromRequest } from "npm:@base44/sdk@0.8.31";
 
@@ -10,7 +18,7 @@ Deno.serve(async (req) => {
 
   try {
     const input = await req.json();
-    const { cobrancaId } = input;
+    const { cobrancaId, parcelasAtuaisIds } = input;
 
     if (!cobrancaId) {
       return new Response(JSON.stringify({
@@ -22,7 +30,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ===== BUSCAR COBRANÇA E PARCELAS EXISTENTES =====
+    // ===== BUSCAR COBRANÇA =====
     const cobranca = await base44.entities.Cobranca.get(cobrancaId);
     if (!cobranca) {
       return new Response(JSON.stringify({
@@ -34,42 +42,52 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Listar todas as parcelas e filtrar por cobrancaId manualmente
-    // (o filter da SDK pode não funcionar como esperado no backend)
-    const todasParcelas = await base44.entities.Parcela.list({ limit: 500 });
-    const parcelasExistentes = todasParcelas.filter((p: any) => p.cobrancaId === cobrancaId);
+    // ===== BUSCAR PARCELAS EXISTENTES VIA get(id) =====
+    // list() não funciona no backend SDK — retorna array vazio.
+    // O frontend passa os IDs das parcelas atuais via parcelasAtuaisIds.
+    const parcelasExistentes = [];
+    if (parcelasAtuaisIds && Array.isArray(parcelasAtuaisIds)) {
+      for (const pid of parcelasAtuaisIds) {
+        try {
+          const parcela = await base44.entities.Parcela.get(pid);
+          if (parcela) {
+            parcelasExistentes.push(parcela);
+          }
+        } catch (e) {
+          // Parcela pode ter sido removida — ignorar
+        }
+      }
+    }
 
-    // ===== VERIFICAR PERMISSÃO DE EDIÇÃO =====
-    // Plano v2.0: permite regeneração se todas estão pendente OU cobrado
-    // PRD v2.0 seção 7.5: permite apenas se todas estão pendente
-    // Esta implementação segue o Plano v2.0 (aprovado). Pendente de confirmação definitiva.
-    const todasEditaveis = parcelasExistentes.every(
-      (p: any) => p.status === "pendente" || p.status === "cobrado"
+    // ===== VERIFICAR PERMISSÃO DE EDIÇÃO (PRD v2.0 seção 7.5) =====
+    // Regeneração permitida APENAS se TODAS as parcelas têm status = "pendente"
+    const todasPendentes = parcelasExistentes.length > 0 && parcelasExistentes.every(
+      (p: any) => p.status === "pendente"
     );
 
-    const algumPagamento = parcelasExistentes.some(
-      (p: any) => p.status === "pago" || p.status === "pago_parcial" || p.valorPago !== null
-    );
-
-    if (!todasEditaveis || algumPagamento) {
-      // ===== EDIÇÃO LIMITADA: apenas observacoes e pixUtilizado =====
+    if (!todasPendentes) {
+      // ===== EDIÇÃO LIMITADA =====
+      // Só pode atualizar observacoes e pixUtilizado
       const updateData: any = {};
       if (input.observacoes !== undefined) updateData.observacoes = input.observacoes;
       if (input.pixUtilizado !== undefined) updateData.pixUtilizado = input.pixUtilizado;
 
-      await base44.entities.Cobranca.update(cobrancaId, updateData);
+      if (Object.keys(updateData).length > 0) {
+        await base44.entities.Cobranca.update(cobrancaId, updateData);
+      }
 
       return new Response(JSON.stringify({
         sucesso: true,
         cobrancaId: cobrancaId,
         edicaoLimitada: true,
-        mensagem: "Apenas observações e PIX foram atualizados. Existem parcelas com pagamentos registrados.",
+        mensagem: "Edição limitada: existem parcelas que não estão pendentes. Apenas observações e PIX foram atualizados.",
       }), {
         headers: { "Content-Type": "application/json" },
       });
     }
 
     // ===== EDIÇÃO COMPLETA COM REGENERAÇÃO =====
+    // Todas as parcelas estão pendentes — permitir regeneração
 
     const novoValor = input.valor !== undefined ? input.valor : cobranca.valor;
     const novaQtdParcelas = input.quantidadeParcelas !== undefined ? input.quantidadeParcelas : cobranca.quantidadeParcelas;
@@ -147,48 +165,12 @@ Deno.serve(async (req) => {
     // ===== ESTRATÉGIA CRIAR-ANTES-DELETAR =====
 
     // 1. Criar novas parcelas
+    let parcelasCriadas;
     try {
-      const parcelasCriadas = await Promise.all(
+      parcelasCriadas = await Promise.all(
         novasParcelas.map((p) => base44.entities.Parcela.create(p))
       );
-
-      // 2. Se sucesso, deletar parcelas antigas (uma a uma)
-      const errosDelete: string[] = [];
-      for (const p of parcelasExistentes) {
-        try {
-          await base44.entities.Parcela.delete(p.id);
-        } catch (e) {
-          errosDelete.push(`Falha ao deletar parcela ${p.id}: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // 3. Atualizar cobrança
-      const updateData: any = {
-        valor: novoValor,
-        quantidadeParcelas: novaQtdParcelas,
-        primeiroVencimento: novoPrimeiroVencimento,
-        diaVencimentoFixo: novoDiaVencimentoFixo,
-      };
-      if (input.observacoes !== undefined) updateData.observacoes = input.observacoes;
-      if (input.pixUtilizado !== undefined) updateData.pixUtilizado = input.pixUtilizado;
-
-      await base44.entities.Cobranca.update(cobrancaId, updateData);
-
-      return new Response(JSON.stringify({
-        sucesso: true,
-        cobrancaId: cobrancaId,
-        parcelas: parcelasCriadas.map((p) => ({
-          numeroParcela: p.numeroParcela,
-          valor: p.valor,
-          dataVencimento: p.dataVencimento,
-        })),
-        avisos: errosDelete.length > 0 ? errosDelete : undefined,
-      }), {
-        headers: { "Content-Type": "application/json" },
-      });
-
     } catch (batchError) {
-      // Se criar novas falha, as antigas continuam existindo
       return new Response(JSON.stringify({
         sucesso: false,
         erro: "Falha ao criar novas parcelas. Parcelas originais preservadas.",
@@ -198,6 +180,58 @@ Deno.serve(async (req) => {
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    // 2. Se sucesso, deletar parcelas antigas via delete(id)
+    const errosDelete: string[] = [];
+    for (const p of parcelasExistentes) {
+      try {
+        await base44.entities.Parcela.delete(p.id);
+      } catch (e) {
+        errosDelete.push(`parcela ${p.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    // 3. Atualizar cobrança
+    const updateData: any = {
+      valor: novoValor,
+      quantidadeParcelas: novaQtdParcelas,
+      primeiroVencimento: novoPrimeiroVencimento,
+      diaVencimentoFixo: novoDiaVencimentoFixo,
+    };
+    if (input.observacoes !== undefined) updateData.observacoes = input.observacoes;
+    if (input.pixUtilizado !== undefined) updateData.pixUtilizado = input.pixUtilizado;
+
+    await base44.entities.Cobranca.update(cobrancaId, updateData);
+
+    // 4. Se houve falha no delete, reportar
+    if (errosDelete.length > 0) {
+      return new Response(JSON.stringify({
+        sucesso: false,
+        cobrancaId: cobrancaId,
+        erro: "Novas parcelas criadas mas falha ao deletar parcelas antigas. Regeneração incompleta.",
+        detalhe: errosDelete,
+        parcelasCriadas: parcelasCriadas.map((p) => ({
+          numeroParcela: p.numeroParcela,
+          valor: p.valor,
+          dataVencimento: p.dataVencimento,
+        })),
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({
+      sucesso: true,
+      cobrancaId: cobrancaId,
+      parcelas: parcelasCriadas.map((p) => ({
+        numeroParcela: p.numeroParcela,
+        valor: p.valor,
+        dataVencimento: p.dataVencimento,
+      })),
+    }), {
+      headers: { "Content-Type": "application/json" },
+    });
 
   } catch (error) {
     return new Response(JSON.stringify({
