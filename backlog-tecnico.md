@@ -83,3 +83,18 @@ Avaliar após conclusão do Sprint 9 (MVP funcional).
 **Origem:** Retrospectiva Sprint 1, item 8c
 **Descrição:** `const cob2p1` declarado mas nunca referenciado.
 **Impacto:** Código limpo — 1 linha.
+
+## BT-17: Atualizar Plano v2.0 — M2b critério "cobrado" (DIVERGÊNCIA PRD vs PLANO)
+**Origem:** Sprint 3 — correção M2b
+**Descrição:** O Plano v2.0 M2b critério 2 diz "Editar cobrança com parcela cobrada → parcelas são regeneradas (cobrado != pago)". O PRD v2.0 seção 7.5 diz que a regeneração é permitida APENAS se todas as parcelas têm status=pendente. O PRD prevalece. O Plano deve ser atualizado para refletir que cobrado bloqueia a regeneração (edição limitada).
+**Impacto:** Documentação — Plano v2.0 diverge do PRD v2.0 em 1 critério de M2b.
+
+## BT-18: base44.entities.EntityName.list() retorna array vazio no backend SDK
+**Origem:** Sprint 3 — correção M2b
+**Descrição:** `base44.entities.Parcela.list({ limit: 500 })` e `base44.asServiceRole.entities.Parcela.list({ limit: 500 })` retornam array vazio em backend functions (Deno.serve). `get(id)`, `create()` e `update()` funcionam normalmente. Isso afeta seedTestData (o "limpar" step é no-op) e editarCobranca (não encontra parcelas antigas). Solução aplicada: editarCobranca recebe `parcelasAtuaisIds` do frontend e usa `get(id)` individualmente.
+**Impacto:** Arquitetura — todas as backend functions que precisam listar registros devem receber IDs externamente ou usar uma abordagem alternativa. Investigar se `list()` com outros parâmetros funciona.
+
+## BT-19: seedTestData "limpar" não funciona (list() retorna vazio)
+**Origem:** Sprint 3 — correção M2b
+**Descrição:** Como consequência do BT-18, o parâmetro `limpar: true` no seedTestData é um no-op — a função não consegue listar parcelas/cobranças existentes para deletá-las. Cada chamada cria dados adicionais em vez de substituir.
+**Impacto:** Testes — acumulação de dados de teste entre execuções. Solução temporária: limpar dados manualmente via update_entities/delete_entities antes de semear.
