@@ -72,14 +72,3 @@ export function formatarTelefoneCurto(telefone: string): string {
   const formatado = formatarTelefone(telefone);
   return formatado.slice(0, 10) + '...';
 }
-
-/**
- * Recebe uma data ISO (YYYY-MM-DD) e retorna no formato curto brasileiro (DD/MM).
- * Reimplementação independente para evitar acoplamento com date.utils.ts.
- */
-export function formatarDataCurta(iso: string): string {
-  const parts = iso.split('-');
-  if (parts.length !== 3) return iso;
-  const [, month, day] = parts;
-  return `${day}/${month}`;
-}

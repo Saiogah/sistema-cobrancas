@@ -10,7 +10,8 @@ import {
   BLOCO_PIX,
   selecionarTemplate,
 } from "../config/messages.config";
-import { formatarMoedaSimples, formatarDataCurta } from "../lib/format.utils";
+import { formatarMoedaSimples } from "../lib/format.utils";
+import { formatarDataCurta } from "../lib/date.utils";
 
 /**
  * Gera um link wa.me para abrir o WhatsApp com mensagem pré-preenchida.
