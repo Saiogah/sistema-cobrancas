@@ -1,0 +1,149 @@
+// hooks/useDashboard.ts — Hook do Dashboard com cálculo de atrasados em tempo real (M6b)
+//
+// PRD v2.0 seção 5 — Performance: cache em memória, sem polling, sem setInterval.
+// Busca parcelas não arquivadas com vencimento <= hoje + 30 dias.
+// Filtra por clientes ativos. Calcula atrasadas via overdue.rules.
+// Invalidado por: parcel:paid, parcel:charged, parcel:archived, charge:created, charge:deleted, client:inactivated.
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Parcela as ParcelaAPI, Cliente as ClienteAPI } from "../api/entities";
+import { eventBus } from "../lib/event-bus";
+import { hoje, adicionarMeses } from "../lib/date.utils";
+import { isAtrasada, diasAtraso, ordenarParcelas } from "../domain/overdue.rules";
+import type { Parcela } from "../types/parcel.types";
+
+export interface ProximoVencimento {
+  dia: number;
+  data: string;
+  total: number;
+  valor: number;
+}
+
+export interface Contadores {
+  total: number;
+  valor: number;
+  atrasadas: number;
+}
+
+export interface UseDashboardResult {
+  parcelasHoje: Parcela[];
+  parcelasAtrasadas: Parcela[];
+  proximosVencimentos: ProximoVencimento[];
+  contadores: Contadores;
+  loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useDashboard(): UseDashboardResult {
+  const [parcelasHoje, setParcelasHoje] = useState<Parcela[]>([]);
+  const [parcelasAtrasadas, setParcelasAtrasadas] = useState<Parcela[]>([]);
+  const [proximosVencimentos, setProximosVencimentos] = useState<ProximoVencimento[]>([]);
+  const [contadores, setContadores] = useState<Contadores>({ total: 0, valor: 0, atrasadas: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const cacheRef = useRef<{ parcelas: Parcela[]; dataReferencia: string } | null>(null);
+
+  const fetchDashboard = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const dataHoje = hoje();
+      const limiteSuperior = adicionarMeses(dataHoje, 1); // hoje + 30 dias aprox
+
+      // Buscar clientes ativos
+      const todosClientes = await ClienteAPI.list();
+      const clientesAtivosIds = new Set(
+        todosClientes.filter((c: any) => c.ativo === true).map((c: any) => c.id)
+      );
+
+      // Buscar todas as parcelas e filtrar manualmente
+      const todasParcelas = await ParcelaAPI.list({ limit: 500 });
+      const parcelasFiltradas = todasParcelas.filter((p: any) =>
+        !p.arquivada &&
+        p.dataVencimento <= limiteSuperior &&
+        p.status !== "pago" &&
+        clientesAtivosIds.has(p.clienteId)
+      ) as Parcela[];
+
+      // Separar atrasadas e de hoje
+      const atrasadas = parcelasFiltradas.filter((p) => isAtrasada(p, dataHoje));
+      const hojeParcelas = parcelasFiltradas.filter(
+        (p) => p.dataVencimento === dataHoje && !isAtrasada(p, dataHoje)
+      );
+
+      // Ordenar ambas as listas
+      const atrasadasOrdenadas = ordenarParcelas(atrasadas, dataHoje);
+      const hojeOrdenadas = ordenarParcelas(hojeParcelas, dataHoje);
+
+      // Próximos vencimentos: próximos 3 dias COM parcelas após hoje
+      const proximos: ProximoVencimento[] = [];
+      const datasVistas = new Set<string>();
+
+      // Coletar datas de vencimento futuras (após hoje, excluindo hoje)
+      const datasFuturas = parcelasFiltradas
+        .filter((p) => p.dataVencimento > dataHoje)
+        .map((p) => p.dataVencimento)
+        .sort();
+
+      // Agrupar por data e pegar os primeiros 3 dias
+      for (const data of datasFuturas) {
+        if (datasVistas.has(data)) continue;
+        datasVistas.add(data);
+
+        const parcelasDoDia = parcelasFiltradas.filter((p) => p.dataVencimento === data);
+        const dia = parseInt(data.split("-")[2], 10);
+        const valor = parcelasDoDia.reduce((sum, p) => sum + p.valor, 0);
+
+        proximos.push({ dia, data, total: parcelasDoDia.length, valor });
+
+        if (proximos.length >= 3) break;
+      }
+
+      // Contadores
+      const todasRelevantes = [...atrasadas, ...hojeParcelas];
+      const total = todasRelevantes.length;
+      const valor = todasRelevantes.reduce((sum, p) => sum + p.valor, 0);
+      const numAtrasadas = atrasadas.length;
+
+      cacheRef.current = { parcelas: parcelasFiltradas, dataReferencia: dataHoje };
+      setParcelasHoje(hojeOrdenadas);
+      setParcelasAtrasadas(atrasadasOrdenadas);
+      setProximosVencimentos(proximos);
+      setContadores({ total, valor, atrasadas: numAtrasadas });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao carregar dashboard";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard]);
+
+  // Invalidação por EventBus
+  useEffect(() => {
+    const unsubs = [
+      eventBus.on("parcel:paid", () => fetchDashboard()),
+      eventBus.on("parcel:charged", () => fetchDashboard()),
+      eventBus.on("parcel:archived", () => fetchDashboard()),
+      eventBus.on("parcel:unarchived", () => fetchDashboard()),
+      eventBus.on("charge:created", () => fetchDashboard()),
+      eventBus.on("charge:deleted", () => fetchDashboard()),
+      eventBus.on("client:inactivated", () => fetchDashboard()),
+    ];
+    return () => unsubs.forEach((u) => u());
+  }, [fetchDashboard]);
+
+  return {
+    parcelasHoje,
+    parcelasAtrasadas,
+    proximosVencimentos,
+    contadores,
+    loading,
+    error,
+    refresh: fetchDashboard,
+  };
+}
