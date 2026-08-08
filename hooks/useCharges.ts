@@ -7,6 +7,9 @@
 // NOTA ARQUITETURAL: O hook busca cobranças via Cobranca.filter({ clienteId }) e para cada
 // cobrança busca suas parcelas via Parcela.filter({ cobrancaId }). Os IDs das parcelas são
 // preservados no retorno para uso futuro (ex: editarCobranca precisa de parcelasAtuaisIds).
+//
+// BT-20 FIX: todasCarregadas é espelhada em um ref para evitar ciclo entre useEffect e useCallback.
+// fetchCobrancas lê do ref, não do state, então suas deps são apenas [clienteId].
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Cobranca as CobrancaAPI, Parcela as ParcelaAPI } from "../api/entities";
@@ -32,6 +35,7 @@ export function useCharges(clienteId: string | null): UseChargesResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [todasCarregadas, setTodasCarregadas] = useState(false);
+  const todasCarregadasRef = useRef(false);
   const cacheRef = useRef<CobrancaComParcelas[] | null>(null);
 
   const fetchCobrancas = useCallback(async (limite?: number) => {
@@ -49,12 +53,12 @@ export function useCharges(clienteId: string | null): UseChargesResult {
         cobrancasData = await CobrancaAPI.filter({ clienteId });
         // O SDK não suporta limit direto em filter, então slice aplicado após
         // Para paginação real, usar skip/limit quando disponível
-        if (!todasCarregadas && limite > 0) {
+        if (!todasCarregadasRef.current && limite > 0) {
           cobrancasData = cobrancasData.slice(0, limite);
         }
       } else {
         cobrancasData = await CobrancaAPI.filter({ clienteId });
-        if (!todasCarregadas) {
+        if (!todasCarregadasRef.current) {
           cobrancasData = cobrancasData.slice(0, COBRANCAS_RECENTES_LIMIT);
         }
       }
@@ -78,10 +82,11 @@ export function useCharges(clienteId: string | null): UseChargesResult {
     } finally {
       setLoading(false);
     }
-  }, [clienteId, todasCarregadas]);
+  }, [clienteId]);
 
   useEffect(() => {
     setTodasCarregadas(false);
+    todasCarregadasRef.current = false;
     fetchCobrancas();
   }, [fetchCobrancas]);
 
@@ -99,6 +104,7 @@ export function useCharges(clienteId: string | null): UseChargesResult {
 
   const carregarTodas = useCallback(async () => {
     setTodasCarregadas(true);
+    todasCarregadasRef.current = true;
     await fetchCobrancas();
   }, [fetchCobrancas]);
 
