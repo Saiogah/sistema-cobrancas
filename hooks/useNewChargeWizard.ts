@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import type { Cliente } from '../types/client.types';
-import type { FormaPagamento } from '../types/charge.types';
+import type { FormaPagamento } from '../types/common.types';
 
 export interface WizardData {
   // Passo 1

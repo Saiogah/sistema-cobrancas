@@ -12,7 +12,7 @@ import { eventBus } from '../lib/event-bus';
 import { formatarMoeda, formatarTelefone } from '../lib/format.utils';
 import type { Cliente } from '../types/client.types';
 import type { ProdutoServico } from '../types/product.types';
-import type { FormaPagamento } from '../types/charge.types';
+import type { FormaPagamento } from '../types/common.types';
 
 export function NewChargePage() {
   const wizard = useNewChargeWizard();
@@ -49,12 +49,13 @@ export function NewChargePage() {
   }, [refreshProdutos]);
 
   // Seleção de produto
-  const handleSelectProduct = useCallback((produto: ProdutoServico | { id?: string; nome: string; valorPadrao?: number | null; produtoServicoId?: string | null }) => {
-    const prodId = ('id' in produto && produto.id) ? produto.id : (produto.produtoServicoId || null);
-    const valorPadrao = produto.valorPadrao !== undefined && produto.valorPadrao !== null ? produto.valorPadrao : null;
+  const handleSelectProduct = useCallback((produto: ProdutoServico | { nome: string; produtoServicoId: null }) => {
+    const p = produto as any;
+    const prodId: string | null = p.id || p.produtoServicoId || null;
+    const valorPadrao: number | null = p.valorPadrao !== undefined && p.valorPadrao !== null ? p.valorPadrao : null;
 
     wizard.updateData({
-      produtoNome: produto.nome,
+      produtoNome: p.nome || '',
       produtoServicoId: prodId,
       valorPadrao: valorPadrao,
       ...(valorPadrao !== null ? { valor: String(valorPadrao) } : {}),
