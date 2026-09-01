@@ -1,13 +1,14 @@
-// pages/ClientsPage.tsx — Página de Clientes (M11)
-// Listagem, busca, edição inline, histórico de cobranças, inativar/reativar, desfazer pagamento.
+// pages/ClientsPage.tsx — Página de Clientes (M11 + integração M14)
+// Listagem, busca, edição inline, histórico de cobranças, inativar/reativar, edição/exclusão de cobrança.
 import React, { useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { useClients } from "../hooks/useClients";
 import { useCharges, type CobrancaComParcelas } from "../hooks/useCharges";
 import { useParcelActions } from "../hooks/useParcelActions";
 import { eventBus } from "../lib/event-bus";
 import { formatarTelefone, formatarMoeda } from "../lib/format.utils";
 import { formatarDataCurta } from "../lib/date.utils";
-import { podeEditarCobranca, podeExcluirCobranca } from "../domain/parcel.rules";
+import { podeEditarCobranca, podeExcluirCobranca } from "../domain/charge.rules";
 import { SearchInput } from "../components/SearchInput";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
@@ -17,6 +18,7 @@ import type { Parcela } from "../types/parcel.types";
 import type { EstadoAnterior } from "../types/common.types";
 
 export function ClientsPage() {
+  const navigate = useNavigate();
   const { clientes, loading, error, refresh } = useClients();
   const [busca, setBusca] = useState("");
   const [expandidoId, setExpandidoId] = useState<string | null>(null);
@@ -60,10 +62,21 @@ export function ClientsPage() {
     await refresh();
   }, [novoNome, novoTelefone, refresh]);
 
-  const handleExcluirCobranca = useCallback(async (id: string) => {
-    if (!window.confirm("Excluir cobrança?")) return;
-    await CobrancaAPI.delete(id);
-    eventBus.emit("charge:deleted");
+  const handleEditarCobranca = useCallback((id: string) => {
+    navigate(`/nova?editar=${encodeURIComponent(id)}`);
+  }, [navigate]);
+
+  const handleExcluirCobranca = useCallback(async (cobranca: CobrancaComParcelas, cliente: Cliente) => {
+    // A UI e a RPC aplicam a mesma proteção: histórico com pagamento não pode ser apagado.
+    if (!podeExcluirCobranca(cobranca.parcelas)) return;
+    if (!window.confirm(`Excluir cobrança de ${cliente.nome}? Todas as parcelas serão deletadas.`)) return;
+    try {
+      await CobrancaAPI.delete(cobranca.id);
+      eventBus.emit("charge:deleted");
+    } catch (e) {
+      const detalhe = e instanceof Error ? e.message : "Erro desconhecido";
+      window.alert(`Erro ao excluir cobrança. ${detalhe}`);
+    }
   }, []);
 
   if (loading) return React.createElement("div", { className: "flex justify-center py-12" }, React.createElement("p", { className: "text-muted-foreground" }, "Carregando..."));
@@ -95,7 +108,8 @@ export function ClientsPage() {
             onSave: () => handleSalvar(c), onCancel: () => setEditandoId(null),
             onInativar: () => handleInativar(c), onReativar: () => handleReativar(c),
             onSetENome: setENome, onSetETel: setETel, onSetEObs: setEObs,
-            onExcluirCobranca: handleExcluirCobranca,
+            onEditarCobranca: handleEditarCobranca,
+            onExcluirCobranca: (cobranca: CobrancaComParcelas) => handleExcluirCobranca(cobranca, c),
           })),
         ),
   );
@@ -107,7 +121,8 @@ interface ClientCardProps {
   onToggle: () => void; onInativar: () => void; onReativar: () => void;
   onEdit: () => void; onSave: () => void; onCancel: () => void;
   onSetENome: (v: string) => void; onSetETel: (v: string) => void; onSetEObs: (v: string) => void;
-  onExcluirCobranca: (id: string) => void;
+  onEditarCobranca: (id: string) => void;
+  onExcluirCobranca: (cobranca: CobrancaComParcelas) => void;
 }
 
 function ClientCard(props: ClientCardProps) {
@@ -166,8 +181,13 @@ function ClientCard(props: ClientCardProps) {
                       React.createElement("span", { className: "text-xs text-muted-foreground" }, `${cob.quantidadeParcelas}x · ${formatarMoeda(cob.valor)}`),
                     ),
                     React.createElement("div", { className: "flex gap-1" },
-                      pEdit ? React.createElement("button", { onClick: (e: any) => e.stopPropagation(), className: "rounded border px-2 py-0.5 text-xs" }, "Editar") : null,
-                      pExc ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); props.onExcluirCobranca(cob.id); }, className: "rounded border px-2 py-0.5 text-xs text-destructive" }, "Excluir") : null,
+                      // M14 torna a edição limitada acessível também quando pEdit=false.
+                      React.createElement("button", {
+                        onClick: (e: any) => { e.stopPropagation(); props.onEditarCobranca(cob.id); },
+                        className: "rounded border px-2 py-0.5 text-xs",
+                        title: pEdit ? "Editar cobrança" : "Editar observações e PIX",
+                      }, "Editar"),
+                      pExc ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); props.onExcluirCobranca(cob); }, className: "rounded border px-2 py-0.5 text-xs text-destructive" }, "Excluir") : null,
                     ),
                   ),
                   isExp ? React.createElement("div", { className: "mt-2 space-y-1 pl-2" },

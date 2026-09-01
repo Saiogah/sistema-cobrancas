@@ -62,6 +62,13 @@ export function useNewChargeWizard() {
     setIsDirty(true);
   }, []);
 
+  const hydrateData = useCallback((nextData: WizardData, passo = 1) => {
+    setData(nextData);
+    setPassoAtual(Math.min(Math.max(passo, 1), 4));
+    setIsDirty(false);
+    setClienteSugerido(null);
+  }, []);
+
   const selecionarDiaVencimento = useCallback((dia: DiaVencimento) => {
     setData(prev => ({
       ...prev,
@@ -140,6 +147,7 @@ export function useNewChargeWizard() {
     isPasso2Valid,
     isPasso3Valid,
     updateData,
+    hydrateData,
     selecionarDiaVencimento,
     irParaPasso,
     proximoPasso,
