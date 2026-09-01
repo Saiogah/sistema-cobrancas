@@ -1,4 +1,4 @@
-import { adicionarMeses, mesAlvoExisteDia } from '../lib/date.utils';
+import { adicionarMeses, hoje, mesAlvoExisteDia, proximoVencimento } from '../lib/date.utils';
 
 /**
  * Calcula a data de vencimento da parcela N.
@@ -14,7 +14,6 @@ export function calcularVencimentoParcela(
   if (numeroParcela === 1) {
     return primeiroVencimento;
   }
-
   const base = adicionarMeses(primeiroVencimento, numeroParcela - 1);
   const [yearStr, monthStr] = base.split('-');
   const ano = parseInt(yearStr, 10);
@@ -28,4 +27,12 @@ export function calcularVencimentoParcela(
     const lastDay = new Date(ano, mes, 0).getDate();
     return `${ano}-${pad(mes)}-${pad(lastDay)}`;
   }
+}
+
+/**
+ * Sugere o primeiro vencimento para o wizard: próxima ocorrência do dia fixo
+ * a partir de hoje, inclusive, usando a data local de America/Sao_Paulo.
+ */
+export function calcularPrimeiroVencimentoSugerido(diaFixo: number): string {
+  return proximoVencimento(diaFixo, hoje());
 }
