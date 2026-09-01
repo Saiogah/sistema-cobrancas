@@ -1,4 +1,14 @@
 {
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.sprint4.json",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:db:reset": "supabase db reset"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.112.4",
+    "react-router-dom": "^7.18.3"
+  },
   "devDependencies": {
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
@@ -7,6 +17,7 @@
     "jsdom": "^29.1.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "supabase": "^2.116.0",
     "typescript": "^7.0.2"
   }
 }

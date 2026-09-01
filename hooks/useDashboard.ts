@@ -1,15 +1,11 @@
-// hooks/useDashboard.ts — Hook do Dashboard com cálculo de atrasados em tempo real (M6b)
-//
+// hooks/useDashboard.ts — Hook do Dashboard com cálculo de atrasados em tempo real (M6b + M14)
 // PRD v2.0 seção 5 — Performance: cache em memória, sem polling, sem setInterval.
-// Busca parcelas não arquivadas com vencimento <= hoje + 30 dias.
-// Filtra por clientes ativos. Calcula atrasadas via overdue.rules.
-// Invalidado por: parcel:paid, parcel:charged, parcel:archived, charge:created, charge:deleted, client:inactivated.
-
+// Invalidado por ações de parcela e por criação/edição/exclusão de cobranças.
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Parcela as ParcelaAPI, Cliente as ClienteAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
 import { hoje, adicionarMeses } from "../lib/date.utils";
-import { isAtrasada, diasAtraso, ordenarParcelas } from "../domain/overdue.rules";
+import { isAtrasada, ordenarParcelas } from "../domain/overdue.rules";
 import type { Parcela } from "../types/parcel.types";
 
 export interface ProximoVencimento {
@@ -18,7 +14,6 @@ export interface ProximoVencimento {
   total: number;
   valor: number;
 }
-
 export interface Contadores {
   total: number;
   valor: number;
@@ -49,15 +44,11 @@ export function useDashboard(): UseDashboardResult {
     setError(null);
     try {
       const dataHoje = hoje();
-      const limiteSuperior = adicionarMeses(dataHoje, 1); // hoje + 30 dias aprox
-
-      // Buscar clientes ativos
+      const limiteSuperior = adicionarMeses(dataHoje, 1);
       const todosClientes = await ClienteAPI.list();
       const clientesAtivosIds = new Set(
         todosClientes.filter((c: any) => c.ativo === true).map((c: any) => c.id)
       );
-
-      // Buscar todas as parcelas e filtrar manualmente
       const todasParcelas = await ParcelaAPI.list({ limit: 500 });
       const parcelasFiltradas = todasParcelas.filter((p: any) =>
         !p.arquivada &&
@@ -66,46 +57,34 @@ export function useDashboard(): UseDashboardResult {
         clientesAtivosIds.has(p.clienteId)
       ) as Parcela[];
 
-      // Separar atrasadas e de hoje
       const atrasadas = parcelasFiltradas.filter((p) => isAtrasada(p, dataHoje));
       const hojeParcelas = parcelasFiltradas.filter(
         (p) => p.dataVencimento === dataHoje && !isAtrasada(p, dataHoje)
       );
 
-      // Ordenar ambas as listas
       const atrasadasOrdenadas = ordenarParcelas(atrasadas, dataHoje);
       const hojeOrdenadas = ordenarParcelas(hojeParcelas, dataHoje);
-
-      // Próximos vencimentos: próximos 3 dias COM parcelas após hoje
       const proximos: ProximoVencimento[] = [];
       const datasVistas = new Set<string>();
-
-      // Coletar datas de vencimento futuras (após hoje, excluindo hoje)
       const datasFuturas = parcelasFiltradas
         .filter((p) => p.dataVencimento > dataHoje)
         .map((p) => p.dataVencimento)
         .sort();
 
-      // Agrupar por data e pegar os primeiros 3 dias
       for (const data of datasFuturas) {
         if (datasVistas.has(data)) continue;
         datasVistas.add(data);
-
         const parcelasDoDia = parcelasFiltradas.filter((p) => p.dataVencimento === data);
         const dia = parseInt(data.split("-")[2], 10);
         const valor = parcelasDoDia.reduce((sum, p) => sum + p.valor, 0);
-
         proximos.push({ dia, data, total: parcelasDoDia.length, valor });
-
         if (proximos.length >= 3) break;
       }
 
-      // Contadores
       const todasRelevantes = [...atrasadas, ...hojeParcelas];
       const total = todasRelevantes.length;
       const valor = todasRelevantes.reduce((sum, p) => sum + p.valor, 0);
       const numAtrasadas = atrasadas.length;
-
       cacheRef.current = { parcelas: parcelasFiltradas, dataReferencia: dataHoje };
       setParcelasHoje(hojeOrdenadas);
       setParcelasAtrasadas(atrasadasOrdenadas);
@@ -123,7 +102,6 @@ export function useDashboard(): UseDashboardResult {
     fetchDashboard();
   }, [fetchDashboard]);
 
-  // Invalidação por EventBus
   useEffect(() => {
     const unsubs = [
       eventBus.on("parcel:paid", () => fetchDashboard()),
@@ -131,6 +109,7 @@ export function useDashboard(): UseDashboardResult {
       eventBus.on("parcel:archived", () => fetchDashboard()),
       eventBus.on("parcel:unarchived", () => fetchDashboard()),
       eventBus.on("charge:created", () => fetchDashboard()),
+      eventBus.on("charge:updated", () => fetchDashboard()),
       eventBus.on("charge:deleted", () => fetchDashboard()),
       eventBus.on("client:inactivated", () => fetchDashboard()),
     ];
