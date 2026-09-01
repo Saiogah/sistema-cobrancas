@@ -1,5 +1,8 @@
-.agents/.env
 node_modules/
-.npm/
-__pycache__/
-.cache/
+*.log
+.env
+.DS_Store
+dist/
+build/
+conversations/
+.agents/
