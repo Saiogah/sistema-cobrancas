@@ -13,6 +13,7 @@ import { podeEditarCobranca, podeExcluirCobranca } from "../domain/charge.rules"
 import { SearchInput } from "../components/SearchInput";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
+import { ActionToast } from "../components/ActionToast";
 import { Cliente as ClienteAPI, Cobranca as CobrancaAPI } from "../api/entities";
 import type { Cliente } from "../types/client.types";
 import type { Parcela } from "../types/parcel.types";
@@ -137,9 +138,40 @@ interface ClientCardProps {
 
 function ClientCard(props: ClientCardProps) {
   const { cliente, expandido, editando } = props;
-  const { cobrancas, loading: cLoading, carregarTodas, todasCarregadas } = useCharges(expandido ? cliente.id : null);
+  const {
+    cobrancas, loading: cLoading, loadingMore, total, temMais, carregarMais, refresh: refreshCharges, patchParcelaLocal,
+  } = useCharges(expandido ? cliente.id : null);
   const parcelActions = useParcelActions();
   const [cobExpandida, setCobExpandida] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{ message: string; retry: () => void } | null>(null);
+
+  const desarquivarOptimista = useCallback(async (par: Parcela) => {
+    const estadoAnterior = { arquivada: par.arquivada, status: par.status };
+    patchParcelaLocal(par.id, { arquivada: false });
+    try {
+      await parcelActions.desarquivar(par.id);
+      await refreshCharges();
+    } catch {
+      patchParcelaLocal(par.id, estadoAnterior as any);
+      setActionError({ message: "Erro ao desarquivar. Tente novamente.", retry: () => void desarquivarOptimista(par) });
+    }
+  }, [parcelActions, patchParcelaLocal, refreshCharges]);
+
+  const desfazerPagamentoOptimista = useCallback(async (par: Parcela) => {
+    const anterior = { status: par.status, valorPago: par.valorPago, dataPagamento: par.dataPagamento };
+    const est: EstadoAnterior = {
+      status: par.dataCobrancaEnviada ? "cobrado" : "pendente",
+      valorPago: null, dataPagamento: null, dataCobrancaEnviada: par.dataCobrancaEnviada,
+    };
+    patchParcelaLocal(par.id, { status: est.status, valorPago: null, dataPagamento: null });
+    try {
+      await parcelActions.desfazerPagamento(par.id, est);
+      await refreshCharges();
+    } catch {
+      patchParcelaLocal(par.id, anterior as any);
+      setActionError({ message: "Erro ao desfazer pagamento. Tente novamente.", retry: () => void desfazerPagamentoOptimista(par) });
+    }
+  }, [parcelActions, patchParcelaLocal, refreshCharges]);
 
   return React.createElement("div", { className: "rounded-lg border bg-card", onClick: props.onToggle },
     React.createElement("div", { className: "flex items-center justify-between p-3 cursor-pointer" },
@@ -208,19 +240,12 @@ function ClientCard(props: ClientCardProps) {
                         React.createElement("div", { className: "flex items-center gap-1" },
                           React.createElement(StatusBadge, { status: par.status }),
                           par.arquivada ? React.createElement("button", {
-                            onClick: async (e: any) => {
-                              e.stopPropagation();
-                              await parcelActions.desarquivar(par.id);
-                            },
+                            onClick: (e: any) => { e.stopPropagation(); void desarquivarOptimista(par); },
                             className: "rounded border px-1.5 py-0.5 text-xs",
                             title: "Desarquivar parcela",
                           }, "Desarquivar") : null,
                           isPago && !par.arquivada ? React.createElement("button", {
-                            onClick: async (e: any) => {
-                              e.stopPropagation();
-                              const est: EstadoAnterior = { status: par.dataCobrancaEnviada ? 'cobrado' : 'pendente', valorPago: null, dataPagamento: null, dataCobrancaEnviada: par.dataCobrancaEnviada };
-                              await parcelActions.desfazerPagamento(par.id, est);
-                            },
+                            onClick: (e: any) => { e.stopPropagation(); void desfazerPagamentoOptimista(par); },
                             className: "rounded border px-1.5 py-0.5 text-xs", title: "Desfazer pagamento",
                           }, "↺") : null,
                         ),
@@ -229,10 +254,20 @@ function ClientCard(props: ClientCardProps) {
                   ) : null,
                 );
               }),
-              !todasCarregadas && cobrancas.length >= 5
-                ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); carregarTodas(); }, className: "text-sm text-primary w-full text-center py-1" }, "Ver todas as cobranças")
-                : null,
+              React.createElement("div", { className: "flex items-center justify-between pt-1 text-xs text-muted-foreground" },
+                React.createElement("span", null, `Mostrando ${cobrancas.length} de ${total}`),
+                temMais ? React.createElement("button", {
+                  onClick: (e: any) => { e.stopPropagation(); void carregarMais(); },
+                  disabled: loadingMore,
+                  className: "text-sm text-primary disabled:opacity-50",
+                }, loadingMore ? "Carregando..." : "Ver mais") : null,
+              ),
             ),
+      actionError ? React.createElement(ActionToast, {
+        message: actionError.message,
+        onRetry: () => { const retry = actionError.retry; setActionError(null); retry(); },
+        onDismiss: () => setActionError(null),
+      }) : null,
     ) : null,
   );
 }
