@@ -1,27 +1,25 @@
-// api/entities.ts — Adapter Supabase compatível com a API usada pelos hooks do projeto.
-// Preserva list/filter/get/create/update/delete e o shape camelCase/created_date do Base44.
+// api/entities.ts — Local IndexedDB Implementation for Single-User Billing System
 
-import { supabase } from './supabase';
-import { criarCobranca, editarCobranca, excluirCobranca } from './rpcs';
 import type { Cliente as ClienteType, ClienteInput, ClienteUpdate } from '../types/client.types';
 import type { ProdutoServico as ProdutoServicoType, ProdutoInput, ProdutoUpdate } from '../types/product.types';
 import type { Cobranca as CobrancaType, CobrancaInput, CobrancaUpdate } from '../types/charge.types';
 import type { Parcela as ParcelaType, ParcelaInput, ParcelaUpdate } from '../types/parcel.types';
+import { gerarParcelas, podeEditarCobranca, podeExcluirCobranca } from '../domain/parcel.rules';
 
-type Row = Record<string, unknown>;
 type FilterValue = unknown;
-type Query = any;
 
-interface ListParams {
+export interface ListParams {
   limit?: number;
   skip?: number;
-  /** Base44: prefixo '-' = desc. Ex.: '-vezesUsado'. Aceita campos separados por vírgula. */
   sort?: string;
 }
 
-export interface PageResult<T> { data: T[]; count: number; }
+export interface PageResult<T> {
+  data: T[];
+  count: number;
+}
 
-interface BaseEntityApi<T, C, U> {
+export interface BaseEntityApi<T, C, U> {
   list(params?: ListParams): Promise<T[]>;
   filter(params: Record<string, FilterValue>): Promise<T[]>;
   page(params: Record<string, FilterValue>, options: ListParams): Promise<PageResult<T>>;
@@ -31,308 +29,564 @@ interface BaseEntityApi<T, C, U> {
   delete(id: string): Promise<void>;
 }
 
-interface ConfiguracaoRecord {
+export interface ConfiguracaoRecord {
   id: string;
   diasTrabalhados: string;
   created_date: string;
   updated_date: string;
 }
 
-interface ConfiguracaoApi {
-  list(params?: { limit?: number; skip?: number }): Promise<ConfiguracaoRecord[]>;
-  filter(params: Record<string, FilterValue>): Promise<ConfiguracaoRecord[]>;
-  get(id: string): Promise<ConfiguracaoRecord>;
-  create(data: { diasTrabalhados: string }): Promise<ConfiguracaoRecord>;
-  update(id: string, data: { diasTrabalhados?: string }): Promise<ConfiguracaoRecord>;
-  delete(id: string): Promise<void>;
+export interface ConfiguracaoInput {
+  diasTrabalhados: string | number[];
 }
 
-const FIELD_MAP: Record<string, string> = {
-  clienteId: 'cliente_id',
-  cobrancaId: 'cobranca_id',
-  produtoServicoId: 'produto_servico_id',
-  nomeProdutoServico: 'nome_produto_servico',
-  valorPadrao: 'valor_padrao',
-  vezesUsado: 'vezes_usado',
-  formaPagamento: 'forma_pagamento',
-  quantidadeParcelas: 'quantidade_parcelas',
-  primeiroVencimento: 'primeiro_vencimento',
-  diaVencimentoFixo: 'dia_vencimento_fixo',
-  pixUtilizado: 'pix_utilizado',
-  numeroParcela: 'numero_parcela',
-  valorPago: 'valor_pago',
-  dataVencimento: 'data_vencimento',
-  dataPagamento: 'data_pagamento',
-  dataCobrancaEnviada: 'data_cobranca_enviada',
-  created_date: 'created_at',
-  updated_date: 'updated_at',
-};
+export interface ConfiguracaoUpdate {
+  diasTrabalhados?: string | number[];
+}
 
-const SYSTEM_FIELDS = new Set(['id', 'created_date', 'updated_date', 'created_at', 'updated_at', 'user_id']);
-const dbField = (field: string): string => FIELD_MAP[field] ?? field;
+// -----------------------------------------------------------------------------
+// IndexedDB Raw Driver & Store Helpers
+// -----------------------------------------------------------------------------
 
-function toDb(input: Row, special?: (key: string, value: unknown) => unknown): Row {
-  const output: Row = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (SYSTEM_FIELDS.has(key) || value === undefined) continue;
-    const transformed = special ? special(key, value) : value;
-    if (transformed === undefined) continue;
-    output[dbField(key)] = transformed;
+const DB_NAME = 'sistema-cobrancas-db';
+const DB_VERSION = 1;
+const STORES = ['clientes', 'produtos_servicos', 'cobrancas', 'parcelas', 'configuracoes'] as const;
+
+let dbPromise: Promise<IDBDatabase> | null = null;
+
+function getDB(): Promise<IDBDatabase> {
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        for (const store of STORES) {
+          if (!db.objectStoreNames.contains(store)) {
+            db.createObjectStore(store, { keyPath: 'id' });
+          }
+        }
+      };
+
+      request.onsuccess = () => {
+        const db = request.result;
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
+
+      request.onerror = () => {
+        dbPromise = null;
+        reject(request.error);
+      };
+    });
   }
-  return output;
+  return dbPromise;
 }
 
-function asNumber(value: unknown): number {
-  return typeof value === 'number' ? value : Number(value);
-}
-
-function clienteFromDb(r: Row): ClienteType {
-  return {
-    id: String(r.id),
-    nome: String(r.nome),
-    telefone: String(r.telefone),
-    observacoes: String(r.observacoes ?? ''),
-    ativo: Boolean(r.ativo),
-    created_date: String(r.created_at),
-    updated_date: String(r.updated_at),
-  };
-}
-
-function produtoFromDb(r: Row): ProdutoServicoType {
-  return {
-    id: String(r.id),
-    nome: String(r.nome),
-    valorPadrao: r.valor_padrao == null ? null : asNumber(r.valor_padrao),
-    vezesUsado: asNumber(r.vezes_usado),
-    created_date: String(r.created_at),
-    updated_date: String(r.updated_at),
-  };
-}
-
-function cobrancaFromDb(r: Row): CobrancaType {
-  return {
-    id: String(r.id),
-    clienteId: String(r.cliente_id),
-    produtoServicoId: r.produto_servico_id == null ? null : String(r.produto_servico_id),
-    nomeProdutoServico: String(r.nome_produto_servico),
-    valor: asNumber(r.valor),
-    formaPagamento: r.forma_pagamento as CobrancaType['formaPagamento'],
-    quantidadeParcelas: asNumber(r.quantidade_parcelas),
-    primeiroVencimento: String(r.primeiro_vencimento),
-    diaVencimentoFixo: asNumber(r.dia_vencimento_fixo) as CobrancaType['diaVencimentoFixo'],
-    pixUtilizado: r.pix_utilizado == null ? null : String(r.pix_utilizado),
-    observacoes: String(r.observacoes ?? ''),
-    created_date: String(r.created_at),
-    updated_date: String(r.updated_at),
-  };
-}
-
-function parcelaFromDb(r: Row): ParcelaType {
-  return {
-    id: String(r.id),
-    cobrancaId: String(r.cobranca_id),
-    clienteId: String(r.cliente_id),
-    numeroParcela: asNumber(r.numero_parcela),
-    valor: asNumber(r.valor),
-    valorPago: r.valor_pago == null ? null : asNumber(r.valor_pago),
-    dataVencimento: String(r.data_vencimento),
-    status: r.status as ParcelaType['status'],
-    dataPagamento: r.data_pagamento == null ? null : String(r.data_pagamento),
-    dataCobrancaEnviada: r.data_cobranca_enviada == null ? null : String(r.data_cobranca_enviada),
-    arquivada: Boolean(r.arquivada),
-    created_date: String(r.created_at),
-    updated_date: String(r.updated_at),
-  };
-}
-
-function configFromDb(r: Row): ConfiguracaoRecord {
-  const raw = r.dias_trabalhados;
-  const dias = Array.isArray(raw) ? raw.join(',') : String(raw ?? '1,2,3,4,5');
-  return {
-    id: String(r.id),
-    diasTrabalhados: dias,
-    created_date: String(r.created_at),
-    updated_date: String(r.updated_at),
-  };
-}
-
-
-function produtoToDbValue(key: string, value: unknown): unknown {
-  // vezesUsado é contador derivado do ciclo de vida da cobrança e só pode ser alterado pelas RPCs.
-  if (key === 'vezesUsado') return undefined;
-  return value;
-}
-
-function configToDbValue(key: string, value: unknown): unknown {
-  if (key !== 'diasTrabalhados') return value;
-  if (Array.isArray(value)) return value.map(Number);
-  return String(value)
-    .split(',')
-    .map((item) => Number(item.trim()))
-    .filter((n) => Number.isInteger(n) && n >= 0 && n <= 6);
-}
-
-function applySort(query: Query, sort?: string): Query {
-  if (!sort) return query.order('created_at', { ascending: false });
-  for (const token of sort.split(',').map((s) => s.trim()).filter(Boolean)) {
-    const descending = token.startsWith('-');
-    const field = descending ? token.slice(1) : token;
-    query = query.order(dbField(field), { ascending: !descending });
+function getAllFromStore<T>(storeName: string, tx?: IDBTransaction): Promise<T[]> {
+  if (tx) {
+    return new Promise((resolve, reject) => {
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result as T[]);
+      req.onerror = () => reject(req.error);
+    });
   }
-  return query;
+  return getDB().then(db => {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readonly');
+      const req = transaction.objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result as T[]);
+      req.onerror = () => reject(req.error);
+    });
+  });
 }
 
-function applyPagination(query: Query, params?: ListParams): Query {
+function getFromStore<T>(storeName: string, id: string, tx?: IDBTransaction): Promise<T | null> {
+  if (tx) {
+    return new Promise((resolve, reject) => {
+      const req = tx.objectStore(storeName).get(id);
+      req.onsuccess = () => resolve((req.result as T) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return getDB().then(db => {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readonly');
+      const req = transaction.objectStore(storeName).get(id);
+      req.onsuccess = () => resolve((req.result as T) ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+function putToStore<T>(storeName: string, record: T, tx?: IDBTransaction): Promise<T> {
+  if (tx) {
+    return new Promise((resolve, reject) => {
+      const req = tx.objectStore(storeName).put(record);
+      req.onsuccess = () => resolve(record);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return getDB().then(db => {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const req = transaction.objectStore(storeName).put(record);
+      req.onsuccess = () => resolve(record);
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+function deleteFromStore(storeName: string, id: string, tx?: IDBTransaction): Promise<void> {
+  if (tx) {
+    return new Promise((resolve, reject) => {
+      const req = tx.objectStore(storeName).delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return getDB().then(db => {
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const req = transaction.objectStore(storeName).delete(id);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  });
+}
+
+async function runTransaction<T>(
+  storeNames: string[],
+  mode: IDBTransactionMode,
+  fn: (tx: IDBTransaction) => Promise<T>
+): Promise<T> {
+  const db = await getDB();
+  const tx = db.transaction(storeNames, mode);
+  try {
+    const result = await fn(tx);
+    return result;
+  } catch (err) {
+    try {
+      tx.abort();
+    } catch (_) {}
+    throw err;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Filtering, Sorting & Pagination Utilities
+// -----------------------------------------------------------------------------
+
+function matchesFilter(record: Record<string, any>, filterParams: Record<string, FilterValue>): boolean {
+  for (const [key, filterValue] of Object.entries(filterParams)) {
+    if (filterValue === undefined) continue;
+    const recValue = record[key];
+
+    if (filterValue === null) {
+      if (recValue !== null && recValue !== undefined) return false;
+    } else if (Array.isArray(filterValue)) {
+      if (!filterValue.includes(recValue)) return false;
+    } else if (typeof filterValue === 'object' && filterValue !== null) {
+      const ops = filterValue as Record<string, any>;
+      if ('$in' in ops && Array.isArray(ops.$in)) {
+        if (!ops.$in.includes(recValue)) return false;
+      }
+      if ('$gt' in ops) {
+        if (!(recValue > ops.$gt)) return false;
+      }
+      if ('$gte' in ops) {
+        if (!(recValue >= ops.$gte)) return false;
+      }
+      if ('$lt' in ops) {
+        if (!(recValue < ops.$lt)) return false;
+      }
+      if ('$lte' in ops) {
+        if (!(recValue <= ops.$lte)) return false;
+      }
+      if ('$ne' in ops) {
+        if (recValue === ops.$ne) return false;
+      }
+    } else {
+      if (recValue !== filterValue) return false;
+    }
+  }
+  return true;
+}
+
+function compareValues(a: any, b: any, desc: boolean): number {
+  if (a === b) return 0;
+  if (a === null || a === undefined) return desc ? 1 : -1;
+  if (b === null || b === undefined) return desc ? -1 : 1;
+  if (typeof a === 'number' && typeof b === 'number') {
+    return desc ? b - a : a - b;
+  }
+  if (typeof a === 'string' && typeof b === 'string') {
+    const cmp = a.localeCompare(b);
+    return desc ? -cmp : cmp;
+  }
+  const cmp = a > b ? 1 : a < b ? -1 : 0;
+  return desc ? -cmp : cmp;
+}
+
+function applySort<T>(items: T[], sortStr?: string): T[] {
+  const sortTokens = (sortStr || '-created_date').split(',').map(s => s.trim()).filter(Boolean);
+  if (sortTokens.length === 0) return [...items];
+
+  return [...items].sort((a: any, b: any) => {
+    for (const token of sortTokens) {
+      const desc = token.startsWith('-');
+      const field = desc ? token.slice(1) : token;
+      const valA = a[field];
+      const valB = b[field];
+      const cmp = compareValues(valA, valB, desc);
+      if (cmp !== 0) return cmp;
+    }
+    return 0;
+  });
+}
+
+function applyPagination<T>(items: T[], params?: ListParams): T[] {
   const skip = Math.max(0, params?.skip ?? 0);
-  const limit = params?.limit;
-  if (typeof limit === 'number' && limit >= 0) {
-    if (limit === 0) return query.limit(0);
-    return query.range(skip, skip + limit - 1);
+  let result = items.slice(skip);
+  if (params?.limit !== undefined && params.limit >= 0) {
+    result = result.slice(0, params.limit);
   }
-  return skip > 0 ? query.range(skip, skip + 999) : query;
+  return result;
 }
 
-function applyFilter(query: Query, key: string, value: FilterValue): Query {
-  const field = dbField(key);
-  if (value === null) return query.is(field, null);
-  if (Array.isArray(value)) return query.in(field, value);
+// -----------------------------------------------------------------------------
+// Base Generic Repository
+// -----------------------------------------------------------------------------
 
-  if (typeof value === 'object' && value !== null) {
-    const ops = value as Record<string, unknown>;
-    if ('$in' in ops && Array.isArray(ops.$in)) query = query.in(field, ops.$in);
-    if ('$lt' in ops) query = query.lt(field, ops.$lt);
-    if ('$lte' in ops) query = query.lte(field, ops.$lte);
-    if ('$gt' in ops) query = query.gt(field, ops.$gt);
-    if ('$gte' in ops) query = query.gte(field, ops.$gte);
-    if ('$ne' in ops) query = query.neq(field, ops.$ne);
-    return query;
-  }
-
-  return query.eq(field, value);
-}
-
-function createRepository<T, C, U>(
-  table: string,
-  fromDb: (row: Row) => T,
-  options?: { specialToDb?: (key: string, value: unknown) => unknown; allowDelete?: boolean },
+function createRepository<T extends { id: string }, C, U>(
+  storeName: string
 ): BaseEntityApi<T, C, U> {
   return {
     async list(params?: ListParams): Promise<T[]> {
-      let query: Query = supabase.from(table).select('*');
-      query = applySort(query, params?.sort);
-      query = applyPagination(query, params);
-      const { data, error } = await query;
-      if (error) throw error;
-      return ((data ?? []) as Row[]).map(fromDb);
+      const all = await getAllFromStore<T>(storeName);
+      const sorted = applySort(all, params?.sort);
+      return applyPagination(sorted, params);
     },
 
     async filter(params: Record<string, FilterValue>): Promise<T[]> {
-      let query: Query = supabase.from(table).select('*');
-      for (const [key, value] of Object.entries(params)) query = applyFilter(query, key, value);
-      query = applySort(query);
-      const { data, error } = await query;
-      if (error) throw error;
-      return ((data ?? []) as Row[]).map(fromDb);
+      const all = await getAllFromStore<T>(storeName);
+      const filtered = all.filter(r => matchesFilter(r as Record<string, any>, params));
+      return applySort(filtered, '-created_date');
     },
 
     async page(params: Record<string, FilterValue>, options: ListParams): Promise<PageResult<T>> {
-      let query: Query = supabase.from(table).select('*', { count: 'exact' });
-      for (const [key, value] of Object.entries(params)) query = applyFilter(query, key, value);
-      query = applySort(query, options.sort);
-      query = applyPagination(query, options);
-      const { data, count, error } = await query;
-      if (error) throw error;
-      return { data: ((data ?? []) as Row[]).map(fromDb), count: count ?? 0 };
+      const all = await getAllFromStore<T>(storeName);
+      const filtered = all.filter(r => matchesFilter(r as Record<string, any>, params));
+      const count = filtered.length;
+      const sorted = applySort(filtered, options?.sort);
+      const data = applyPagination(sorted, options);
+      return { data, count };
     },
 
     async get(id: string): Promise<T> {
-      const { data, error } = await supabase.from(table).select('*').eq('id', id).single();
-      if (error) throw error;
-      return fromDb(data as Row);
+      const record = await getFromStore<T>(storeName, id);
+      if (!record) {
+        throw new Error(`Registro com id "${id}" não encontrado`);
+      }
+      return record;
     },
 
     async create(input: C): Promise<T> {
-      const payload = toDb(input as Row, options?.specialToDb);
-      const { data, error } = await supabase.from(table).insert(payload).select('*').single();
-      if (error) throw error;
-      return fromDb(data as Row);
+      const now = new Date().toISOString();
+      const record: T = {
+        ...(input as any),
+        id: crypto.randomUUID(),
+        created_date: now,
+        updated_date: now,
+      };
+      await putToStore(storeName, record);
+      return record;
     },
 
     async update(id: string, patch: U): Promise<T> {
-      const payload = toDb(patch as Row, options?.specialToDb);
-      const { data, error } = await supabase.from(table).update(payload).eq('id', id).select('*').single();
-      if (error) throw error;
-      return fromDb(data as Row);
+      const existing = await getFromStore<T>(storeName, id);
+      if (!existing) {
+        throw new Error(`Registro com id "${id}" não encontrado`);
+      }
+      const now = new Date().toISOString();
+      const merged: T = {
+        ...existing,
+        ...(patch as any),
+        id: existing.id,
+        created_date: (existing as any).created_date,
+        updated_date: now,
+      };
+      await putToStore(storeName, merged);
+      return merged;
     },
 
     async delete(id: string): Promise<void> {
-      if (options?.allowDelete === false) {
-        throw new Error(`Exclusão direta de ${table} não é permitida`);
-      }
-      const { error } = await supabase.from(table).delete().eq('id', id);
-      if (error) throw error;
+      await deleteFromStore(storeName, id);
     },
   };
 }
 
-export const Cliente: BaseEntityApi<ClienteType, ClienteInput, ClienteUpdate> = createRepository(
-  'clientes',
-  clienteFromDb,
-  { allowDelete: false },
-);
+// -----------------------------------------------------------------------------
+// Entity Exports
+// -----------------------------------------------------------------------------
 
-export const ProdutoServico: BaseEntityApi<ProdutoServicoType, ProdutoInput, ProdutoUpdate> = createRepository(
-  'produtos_servicos',
-  produtoFromDb,
-  { specialToDb: produtoToDbValue },
-);
+export const Cliente: BaseEntityApi<ClienteType, ClienteInput, ClienteUpdate> = createRepository<
+  ClienteType,
+  ClienteInput,
+  ClienteUpdate
+>('clientes');
 
-const CobrancaRead = createRepository<CobrancaType, CobrancaInput, CobrancaUpdate>(
-  'cobrancas',
-  cobrancaFromDb,
-  { allowDelete: false },
-);
+const produtoBase = createRepository<ProdutoServicoType, ProdutoInput, ProdutoUpdate>('produtos_servicos');
 
-export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate> = {
-  list: CobrancaRead.list,
-  filter: CobrancaRead.filter,
-  page: CobrancaRead.page,
-  get: CobrancaRead.get,
+export const ProdutoServico: BaseEntityApi<ProdutoServicoType, ProdutoInput, ProdutoUpdate> = {
+  ...produtoBase,
   async create(input) {
-    const result = await criarCobranca(input);
-    return CobrancaRead.get(result.cobrancaId);
+    const { vezesUsado, ...rest } = input as any;
+    return produtoBase.create({
+      ...rest,
+      vezesUsado: vezesUsado ?? 0,
+      valorPadrao: rest.valorPadrao ?? null,
+    });
   },
   async update(id, patch) {
-    await editarCobranca(id, patch);
-    return CobrancaRead.get(id);
-  },
-  async delete(id) {
-    await excluirCobranca(id);
+    const { vezesUsado, ...allowedPatch } = patch as any;
+    return produtoBase.update(id, allowedPatch);
   },
 };
 
-const ParcelaRead = createRepository<ParcelaType, ParcelaInput, ParcelaUpdate>(
-  'parcelas',
-  parcelaFromDb,
-  { allowDelete: false },
-);
+const cobrancaBase = createRepository<CobrancaType, CobrancaInput, CobrancaUpdate>('cobrancas');
+
+export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate> = {
+  list: cobrancaBase.list,
+  filter: cobrancaBase.filter,
+  page: cobrancaBase.page,
+  get: cobrancaBase.get,
+
+  async create(input: CobrancaInput): Promise<CobrancaType> {
+    return runTransaction(['cobrancas', 'parcelas', 'produtos_servicos'], 'readwrite', async (tx) => {
+      const now = new Date().toISOString();
+      const cobrancaId = crypto.randomUUID();
+
+      const cobrancaRecord: CobrancaType = {
+        id: cobrancaId,
+        clienteId: input.clienteId,
+        produtoServicoId: input.produtoServicoId ?? null,
+        nomeProdutoServico: input.nomeProdutoServico,
+        valor: input.valor,
+        formaPagamento: input.formaPagamento,
+        quantidadeParcelas: input.quantidadeParcelas,
+        primeiroVencimento: input.primeiroVencimento,
+        diaVencimentoFixo: input.diaVencimentoFixo,
+        pixUtilizado: input.pixUtilizado ?? null,
+        observacoes: input.observacoes ?? '',
+        created_date: now,
+        updated_date: now,
+      };
+
+      await putToStore('cobrancas', cobrancaRecord, tx);
+
+      // Auto-generate parcelas
+      const parcelasInput = gerarParcelas(input);
+      for (const pInput of parcelasInput) {
+        const parcelaRecord: ParcelaType = {
+          id: crypto.randomUUID(),
+          cobrancaId: cobrancaId,
+          clienteId: input.clienteId,
+          numeroParcela: pInput.numeroParcela,
+          valor: pInput.valor,
+          valorPago: null,
+          dataVencimento: pInput.dataVencimento,
+          status: 'pendente',
+          dataPagamento: null,
+          dataCobrancaEnviada: null,
+          arquivada: false,
+          created_date: now,
+          updated_date: now,
+        };
+        await putToStore('parcelas', parcelaRecord, tx);
+      }
+
+      // Increment vezesUsado on produto if produtoServicoId is provided
+      if (input.produtoServicoId) {
+        const produto = await getFromStore<ProdutoServicoType>('produtos_servicos', input.produtoServicoId, tx);
+        if (produto) {
+          const updatedProduto: ProdutoServicoType = {
+            ...produto,
+            vezesUsado: (produto.vezesUsado || 0) + 1,
+            updated_date: now,
+          };
+          await putToStore('produtos_servicos', updatedProduto, tx);
+        }
+      }
+
+      return cobrancaRecord;
+    });
+  },
+
+  async update(id: string, patch: CobrancaUpdate): Promise<CobrancaType> {
+    return runTransaction(['cobrancas', 'parcelas'], 'readwrite', async (tx) => {
+      const cobranca = await getFromStore<CobrancaType>('cobrancas', id, tx);
+      if (!cobranca) {
+        throw new Error(`Cobrança com id "${id}" não encontrada`);
+      }
+
+      const allParcelas = await getAllFromStore<ParcelaType>('parcelas', tx);
+      const cobrancaParcelas = allParcelas.filter(p => p.cobrancaId === id);
+
+      const canEdit = podeEditarCobranca(cobrancaParcelas);
+      const now = new Date().toISOString();
+
+      let updatedCobranca: CobrancaType;
+
+      if (canEdit) {
+        // Delete existing parcelas
+        for (const p of cobrancaParcelas) {
+          await deleteFromStore('parcelas', p.id, tx);
+        }
+
+        updatedCobranca = {
+          ...cobranca,
+          ...patch,
+          updated_date: now,
+        };
+
+        await putToStore('cobrancas', updatedCobranca, tx);
+
+        // Regenerate new parcelas
+        const newParcelasInput = gerarParcelas({
+          clienteId: updatedCobranca.clienteId,
+          produtoServicoId: updatedCobranca.produtoServicoId,
+          nomeProdutoServico: updatedCobranca.nomeProdutoServico,
+          valor: updatedCobranca.valor,
+          formaPagamento: updatedCobranca.formaPagamento,
+          quantidadeParcelas: updatedCobranca.quantidadeParcelas,
+          primeiroVencimento: updatedCobranca.primeiroVencimento,
+          diaVencimentoFixo: updatedCobranca.diaVencimentoFixo,
+          pixUtilizado: updatedCobranca.pixUtilizado,
+          observacoes: updatedCobranca.observacoes,
+        });
+
+        for (const pInput of newParcelasInput) {
+          const parcelaRecord: ParcelaType = {
+            id: crypto.randomUUID(),
+            cobrancaId: id,
+            clienteId: updatedCobranca.clienteId,
+            numeroParcela: pInput.numeroParcela,
+            valor: pInput.valor,
+            valorPago: null,
+            dataVencimento: pInput.dataVencimento,
+            status: 'pendente',
+            dataPagamento: null,
+            dataCobrancaEnviada: null,
+            arquivada: false,
+            created_date: now,
+            updated_date: now,
+          };
+          await putToStore('parcelas', parcelaRecord, tx);
+        }
+      } else {
+        // Limited edit: only observacoes and pixUtilizado
+        updatedCobranca = {
+          ...cobranca,
+          ...(patch.observacoes !== undefined ? { observacoes: patch.observacoes } : {}),
+          ...(patch.pixUtilizado !== undefined ? { pixUtilizado: patch.pixUtilizado } : {}),
+          updated_date: now,
+        };
+
+        await putToStore('cobrancas', updatedCobranca, tx);
+      }
+
+      return updatedCobranca;
+    });
+  },
+
+  async delete(id: string): Promise<void> {
+    return runTransaction(['cobrancas', 'parcelas', 'produtos_servicos'], 'readwrite', async (tx) => {
+      const cobranca = await getFromStore<CobrancaType>('cobrancas', id, tx);
+      if (!cobranca) return;
+
+      const allParcelas = await getAllFromStore<ParcelaType>('parcelas', tx);
+      const cobrancaParcelas = allParcelas.filter(p => p.cobrancaId === id);
+
+      if (!podeExcluirCobranca(cobrancaParcelas)) {
+        throw new Error('Não é possível excluir cobrança com parcelas pagas ou parcialmente pagas');
+      }
+
+      // Decrement vezesUsado on produto if produtoServicoId exists
+      if (cobranca.produtoServicoId) {
+        const produto = await getFromStore<ProdutoServicoType>('produtos_servicos', cobranca.produtoServicoId, tx);
+        if (produto) {
+          const updatedProduto: ProdutoServicoType = {
+            ...produto,
+            vezesUsado: Math.max(0, (produto.vezesUsado || 0) - 1),
+            updated_date: new Date().toISOString(),
+          };
+          await putToStore('produtos_servicos', updatedProduto, tx);
+        }
+      }
+
+      // Delete parcelas
+      for (const p of cobrancaParcelas) {
+        await deleteFromStore('parcelas', p.id, tx);
+      }
+
+      // Delete cobranca
+      await deleteFromStore('cobrancas', id, tx);
+    });
+  },
+};
+
+const parcelaBase = createRepository<ParcelaType, ParcelaInput, ParcelaUpdate>('parcelas');
 
 export const Parcela: BaseEntityApi<ParcelaType, ParcelaInput, ParcelaUpdate> = {
-  list: ParcelaRead.list,
-  filter: ParcelaRead.filter,
-  page: ParcelaRead.page,
-  get: ParcelaRead.get,
-  async create() {
-    throw new Error('Parcelas são geradas automaticamente pela RPC de cobrança');
+  list: parcelaBase.list,
+  filter: parcelaBase.filter,
+  page: parcelaBase.page,
+  get: parcelaBase.get,
+  update: parcelaBase.update,
+
+  async create(): Promise<ParcelaType> {
+    throw new Error('Parcelas são geradas automaticamente');
   },
-  update: ParcelaRead.update,
-  async delete() {
+
+  async delete(): Promise<void> {
     throw new Error('Exclusão direta de parcelas não é permitida');
   },
 };
 
-export const Configuracao: ConfiguracaoApi = createRepository<
-  ConfiguracaoRecord,
-  { diasTrabalhados: string },
-  { diasTrabalhados?: string }
->('configuracoes', configFromDb, { specialToDb: configToDbValue, allowDelete: false });
+const configBase = createRepository<ConfiguracaoRecord, ConfiguracaoInput, ConfiguracaoUpdate>('configuracoes');
+
+function formatDiasTrabalhados(val: any): string {
+  if (Array.isArray(val)) {
+    return val.map(Number).filter(n => !isNaN(n) && n >= 0 && n <= 6).join(',');
+  }
+  if (typeof val === 'string') {
+    return val;
+  }
+  return '1,2,3,4,5';
+}
+
+export const Configuracao: BaseEntityApi<ConfiguracaoRecord, ConfiguracaoInput, ConfiguracaoUpdate> = {
+  list: configBase.list,
+  filter: configBase.filter,
+  page: configBase.page,
+  get: configBase.get,
+  delete: configBase.delete,
+
+  async create(data: ConfiguracaoInput): Promise<ConfiguracaoRecord> {
+    return configBase.create({
+      diasTrabalhados: formatDiasTrabalhados(data.diasTrabalhados),
+    });
+  },
+
+  async update(id: string, data: ConfiguracaoUpdate): Promise<ConfiguracaoRecord> {
+    const patch: ConfiguracaoUpdate = {};
+    if (data.diasTrabalhados !== undefined) {
+      patch.diasTrabalhados = formatDiasTrabalhados(data.diasTrabalhados);
+    }
+    return configBase.update(id, patch);
+  },
+};
