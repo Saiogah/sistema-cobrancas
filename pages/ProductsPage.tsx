@@ -1,6 +1,6 @@
 // pages/ProductsPage.tsx — Página de Produtos (M12)
 // Listagem ordenada por vezesUsado, edição inline, criação, exclusão, venda avulsa.
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useProducts } from "../hooks/useProducts";
 import { eventBus } from "../lib/event-bus";
 import { formatarMoeda } from "../lib/format.utils";
@@ -19,6 +19,29 @@ export function ProductsPage() {
   const [novoForm, setNovoForm] = useState(false);
   const [novoNome, setNovoNome] = useState("");
   const [novoValor, setNovoValor] = useState("");
+  const [vendasAvulsas, setVendasAvulsas] = useState(0);
+
+  const carregarVendasAvulsas = useCallback(async () => {
+    try {
+      const cobrancas = await CobrancaAPI.filter({ produtoServicoId: null });
+      setVendasAvulsas(cobrancas.length);
+    } catch {
+      // A contagem é informativa; a tela de produtos continua funcional se a leitura falhar.
+    }
+  }, []);
+
+  useEffect(() => {
+    void carregarVendasAvulsas();
+    const atualizar = () => { void carregarVendasAvulsas(); };
+    const offCreated = eventBus.on("charge:created", atualizar);
+    const offUpdated = eventBus.on("charge:updated", atualizar);
+    const offDeleted = eventBus.on("charge:deleted", atualizar);
+    return () => {
+      offCreated();
+      offUpdated();
+      offDeleted();
+    };
+  }, [carregarVendasAvulsas]);
 
   const ordenados = [...produtos].sort((a, b) => b.vezesUsado - a.vezesUsado);
   const filtrados = busca
@@ -72,7 +95,6 @@ export function ProductsPage() {
       ),
     ) : null,
     React.createElement(SearchInput, { placeholder: "Buscar produto...", onChange: setBusca }),
-    // Lista sempre renderizada (mesmo vazia, para mostrar venda avulsa)
     React.createElement("div", { className: "flex flex-col gap-2" },
       filtrados.length === 0
         ? React.createElement(EmptyState, { title: busca ? "Nenhum produto encontrado" : "Nenhum produto", description: busca ? "Tente outra busca" : "Clique em + Novo para cadastrar" })
@@ -80,11 +102,7 @@ export function ProductsPage() {
             const isExp = expandidoId === p.id;
             const isEdit = editandoId === p.id;
             const isMaisUsado = p.vezesUsado === maisUsado && p.vezesUsado > 0;
-            return React.createElement("div", {
-              key: p.id,
-              className: "rounded-lg border bg-card",
-              onClick: () => setExpandidoId(isExp ? null : p.id),
-            },
+            return React.createElement("div", { key: p.id, className: "rounded-lg border bg-card", onClick: () => setExpandidoId(isExp ? null : p.id) },
               React.createElement("div", { className: "flex items-center justify-between p-3 cursor-pointer" },
                 React.createElement("div", { className: "flex items-center gap-2" },
                   isMaisUsado ? React.createElement("span", { className: "text-sm" }, "⭐") : null,
@@ -112,11 +130,10 @@ export function ProductsPage() {
               ) : null,
             );
           }),
-      // Venda avulsa item — sempre visível
       React.createElement("div", { className: "rounded-lg border bg-muted/50 p-3 flex items-center justify-between" },
         React.createElement("div", { className: "flex flex-col" },
           React.createElement("span", { className: "font-medium text-muted-foreground" }, "Venda avulsa"),
-          React.createElement("span", { className: "text-xs text-muted-foreground" }, "Cobranças sem produto cadastrado"),
+          React.createElement("span", { className: "text-xs text-muted-foreground" }, `Usado ${vendasAvulsas} ${vendasAvulsas === 1 ? "vez" : "vezes"}`),
         ),
         React.createElement("span", { className: "text-xs text-muted-foreground" }, "Não editável"),
       ),

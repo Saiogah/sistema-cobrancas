@@ -7,6 +7,7 @@ import { useCharges, type CobrancaComParcelas } from "../hooks/useCharges";
 import { useParcelActions } from "../hooks/useParcelActions";
 import { eventBus } from "../lib/event-bus";
 import { formatarTelefone, formatarMoeda } from "../lib/format.utils";
+import { normalizarTelefone, validarTelefone } from "../lib/validation.utils";
 import { formatarDataCurta } from "../lib/date.utils";
 import { podeEditarCobranca, podeExcluirCobranca } from "../domain/charge.rules";
 import { SearchInput } from "../components/SearchInput";
@@ -48,15 +49,24 @@ export function ClientsPage() {
   }, [refresh]);
 
   const handleSalvar = useCallback(async (c: Cliente) => {
-    await ClienteAPI.update(c.id, { nome: eNome, telefone: eTel, observacoes: eObs });
+    const telefone = normalizarTelefone(eTel);
+    if (!eNome.trim() || !validarTelefone(telefone)) {
+      window.alert("Informe nome e telefone válido com DDD.");
+      return;
+    }
+    await ClienteAPI.update(c.id, { nome: eNome.trim(), telefone, observacoes: eObs });
     eventBus.emit("client:updated");
     setEditandoId(null);
     await refresh();
   }, [eNome, eTel, eObs, refresh]);
 
   const handleCriar = useCallback(async () => {
-    if (!novoNome.trim() || !novoTelefone.trim()) return;
-    await ClienteAPI.create({ nome: novoNome, telefone: novoTelefone, observacoes: "", ativo: true });
+    const telefone = normalizarTelefone(novoTelefone);
+    if (!novoNome.trim() || !validarTelefone(telefone)) {
+      window.alert("Informe nome e telefone válido com DDD.");
+      return;
+    }
+    await ClienteAPI.create({ nome: novoNome.trim(), telefone, observacoes: "", ativo: true });
     eventBus.emit("client:created");
     setNovoForm(false); setNovoNome(""); setNovoTelefone("");
     await refresh();
@@ -197,10 +207,18 @@ function ClientCard(props: ClientCardProps) {
                         React.createElement("span", null, `${par.numeroParcela}. ${formatarMoeda(par.valor)} · ${formatarDataCurta(par.dataVencimento)}`),
                         React.createElement("div", { className: "flex items-center gap-1" },
                           React.createElement(StatusBadge, { status: par.status }),
-                          isPago ? React.createElement("button", {
+                          par.arquivada ? React.createElement("button", {
                             onClick: async (e: any) => {
                               e.stopPropagation();
-                              const est: EstadoAnterior = { status: par.status, valorPago: par.valorPago, dataPagamento: par.dataPagamento, dataCobrancaEnviada: par.dataCobrancaEnviada };
+                              await parcelActions.desarquivar(par.id);
+                            },
+                            className: "rounded border px-1.5 py-0.5 text-xs",
+                            title: "Desarquivar parcela",
+                          }, "Desarquivar") : null,
+                          isPago && !par.arquivada ? React.createElement("button", {
+                            onClick: async (e: any) => {
+                              e.stopPropagation();
+                              const est: EstadoAnterior = { status: par.dataCobrancaEnviada ? 'cobrado' : 'pendente', valorPago: null, dataPagamento: null, dataCobrancaEnviada: par.dataCobrancaEnviada };
                               await parcelActions.desfazerPagamento(par.id, est);
                             },
                             className: "rounded border px-1.5 py-0.5 text-xs", title: "Desfazer pagamento",

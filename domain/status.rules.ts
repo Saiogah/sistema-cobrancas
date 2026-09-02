@@ -5,6 +5,8 @@ import type { Parcela } from '../types/parcel.types';
 /**
  * Calcula o próximo status e campos a atualizar quando uma ação é executada sobre uma parcela.
  * Segue a máquina de transições do PRD v2.0 seção 7.2.
+ *
+ * Importante: arquivamento é um flag independente. O status financeiro da parcela é preservado.
  */
 export function proximoStatus(
   statusAtual: ParcelaStatus,
@@ -15,48 +17,42 @@ export function proximoStatus(
 ): { novoStatus: ParcelaStatus; camposAtualizar: Partial<Parcela> } {
   const diaHoje = dataHoje || hoje();
 
-  // Ação universal: arquivar
   if (acao === 'arquivar') {
     return {
-      novoStatus: 'arquivado',
-      camposAtualizar: {
-        status: 'arquivado',
-        arquivada: true
-      }
+      novoStatus: statusAtual,
+      camposAtualizar: { arquivada: true }
     };
   }
 
-  // Ação universal para arquivado: desarquivar
-  if (statusAtual === 'arquivado' && acao === 'desarquivar') {
-    // Inferir o status anterior baseado nos campos da parcela
-    let statusAnterior: ParcelaStatus = 'pendente';
-    if (parcela.valorPago !== null && parcela.valorPago >= parcela.valor) {
-      statusAnterior = 'pago';
-    } else if (parcela.valorPago !== null && parcela.valorPago > 0) {
-      statusAnterior = 'pago_parcial';
-    } else if (parcela.dataCobrancaEnviada !== null) {
-      statusAnterior = 'cobrado';
+  if (acao === 'desarquivar') {
+    // Compatibilidade com registros antigos que chegaram a persistir status=arquivado.
+    if (statusAtual === 'arquivado') {
+      let statusAnterior: ParcelaStatus = 'pendente';
+      if (parcela.valorPago !== null && parcela.valorPago >= parcela.valor) {
+        statusAnterior = 'pago';
+      } else if (parcela.valorPago !== null && parcela.valorPago > 0) {
+        statusAnterior = 'pago_parcial';
+      } else if (parcela.dataCobrancaEnviada !== null) {
+        statusAnterior = 'cobrado';
+      }
+      return {
+        novoStatus: statusAnterior,
+        camposAtualizar: { status: statusAnterior, arquivada: false }
+      };
     }
 
     return {
-      novoStatus: statusAnterior,
-      camposAtualizar: {
-        status: statusAnterior,
-        arquivada: false
-      }
+      novoStatus: statusAtual,
+      camposAtualizar: { arquivada: false }
     };
   }
 
-  // Máquina de estados baseada em statusAtual e acao
   switch (statusAtual) {
     case 'pendente':
       if (acao === 'confirmar_envio') {
         return {
           novoStatus: 'cobrado',
-          camposAtualizar: {
-            status: 'cobrado',
-            dataCobrancaEnviada: diaHoje
-          }
+          camposAtualizar: { status: 'cobrado', dataCobrancaEnviada: diaHoje }
         };
       }
       break;
@@ -65,11 +61,7 @@ export function proximoStatus(
       if (acao === 'marcar_pago') {
         return {
           novoStatus: 'pago',
-          camposAtualizar: {
-            status: 'pago',
-            dataPagamento: diaHoje,
-            valorPago: parcela.valor
-          }
+          camposAtualizar: { status: 'pago', dataPagamento: diaHoje, valorPago: parcela.valor }
         };
       }
       if (acao === 'marcar_parcial') {
@@ -77,21 +69,13 @@ export function proximoStatus(
         if (recebido >= parcela.valor) {
           return {
             novoStatus: 'pago',
-            camposAtualizar: {
-              status: 'pago',
-              dataPagamento: diaHoje,
-              valorPago: parcela.valor
-            }
-          };
-        } else {
-          return {
-            novoStatus: 'pago_parcial',
-            camposAtualizar: {
-              status: 'pago_parcial',
-              valorPago: recebido
-            }
+            camposAtualizar: { status: 'pago', dataPagamento: diaHoje, valorPago: parcela.valor }
           };
         }
+        return {
+          novoStatus: 'pago_parcial',
+          camposAtualizar: { status: 'pago_parcial', valorPago: recebido }
+        };
       }
       break;
 
@@ -99,11 +83,7 @@ export function proximoStatus(
       if (acao === 'complementar_pagamento') {
         return {
           novoStatus: 'pago',
-          camposAtualizar: {
-            status: 'pago',
-            dataPagamento: diaHoje,
-            valorPago: parcela.valor
-          }
+          camposAtualizar: { status: 'pago', dataPagamento: diaHoje, valorPago: parcela.valor }
         };
       }
       if (acao === 'marcar_parcial') {
@@ -112,21 +92,13 @@ export function proximoStatus(
         if (novoValorPago >= parcela.valor) {
           return {
             novoStatus: 'pago',
-            camposAtualizar: {
-              status: 'pago',
-              dataPagamento: diaHoje,
-              valorPago: parcela.valor
-            }
-          };
-        } else {
-          return {
-            novoStatus: 'pago_parcial',
-            camposAtualizar: {
-              status: 'pago_parcial',
-              valorPago: novoValorPago
-            }
+            camposAtualizar: { status: 'pago', dataPagamento: diaHoje, valorPago: parcela.valor }
           };
         }
+        return {
+          novoStatus: 'pago_parcial',
+          camposAtualizar: { status: 'pago_parcial', valorPago: novoValorPago }
+        };
       }
       break;
   }
@@ -134,10 +106,10 @@ export function proximoStatus(
   throw new Error(`Transição inválida: ${statusAtual} + ${acao}`);
 }
 
-/**
- * Reverte uma parcela ao estado anterior (undo).
- */
-export function desfazerStatus(estadoAnterior: EstadoAnterior): { novoStatus: ParcelaStatus; camposAtualizar: Partial<Parcela> } {
+/** Reverte uma parcela ao estado anterior capturado pelo chamador. */
+export function desfazerStatus(
+  estadoAnterior: EstadoAnterior
+): { novoStatus: ParcelaStatus; camposAtualizar: Partial<Parcela> } {
   const novoStatus = estadoAnterior.status;
   return {
     novoStatus,

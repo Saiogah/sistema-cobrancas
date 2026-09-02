@@ -7,6 +7,7 @@ import { eventBus } from "../lib/event-bus";
 import { hoje, adicionarMeses } from "../lib/date.utils";
 import { isAtrasada, ordenarParcelas } from "../domain/overdue.rules";
 import type { Parcela } from "../types/parcel.types";
+import { DIAS_VENCIMENTO } from "../config/days.config";
 
 export interface ProximoVencimento {
   dia: number;
@@ -67,7 +68,11 @@ export function useDashboard(): UseDashboardResult {
       const proximos: ProximoVencimento[] = [];
       const datasVistas = new Set<string>();
       const datasFuturas = parcelasFiltradas
-        .filter((p) => p.dataVencimento > dataHoje)
+        .filter((p) => {
+          if (p.dataVencimento <= dataHoje) return false;
+          const dia = parseInt(p.dataVencimento.split("-")[2], 10);
+          return DIAS_VENCIMENTO.includes(dia as (typeof DIAS_VENCIMENTO)[number]);
+        })
         .map((p) => p.dataVencimento)
         .sort();
 
