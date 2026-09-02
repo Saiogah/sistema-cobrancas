@@ -1,16 +1,4 @@
-// hooks/useCharges.ts — Hook de cobranças + parcelas por cliente com cache e invalidação (M6a)
-//
-// PRD v2.0 seção 5 — Performance: cache em memória, sem polling, sem setInterval.
-// Limitado a COBRANCAS_RECENTES_LIMIT (5) por padrão. carregarTodas() para paginação.
-// Invalidação por EventBus: charge:created, charge:updated, charge:deleted, parcel:updated.
-//
-// NOTA ARQUITETURAL: O hook busca cobranças via Cobranca.filter({ clienteId }) e para cada
-// cobrança busca suas parcelas via Parcela.filter({ cobrancaId }). Os IDs das parcelas são
-// preservados no retorno para uso futuro (ex: editarCobranca precisa de parcelasAtuaisIds).
-//
-// BT-20 FIX: todasCarregadas é espelhada em um ref para evitar ciclo entre useEffect e useCallback.
-// fetchCobrancas lê do ref, não do state, então suas deps são apenas [clienteId].
-
+// hooks/useCharges.ts — Hook de cobranças + parcelas por cliente com cache e invalidação (M6a + correção M15)
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Cobranca as CobrancaAPI, Parcela as ParcelaAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
@@ -18,10 +6,7 @@ import { COBRANCAS_RECENTES_LIMIT } from "../config/app.config";
 import type { Cobranca } from "../types/charge.types";
 import type { Parcela } from "../types/parcel.types";
 
-export interface CobrancaComParcelas extends Cobranca {
-  parcelas: Parcela[];
-}
-
+export interface CobrancaComParcelas extends Cobranca { parcelas: Parcela[]; }
 export interface UseChargesResult {
   cobrancas: CobrancaComParcelas[];
   loading: boolean;
@@ -44,41 +29,27 @@ export function useCharges(clienteId: string | null): UseChargesResult {
       setLoading(false);
       return;
     }
-
     setLoading(true);
     setError(null);
     try {
-      let cobrancasData: Cobranca[];
-      if (limite) {
-        cobrancasData = await CobrancaAPI.filter({ clienteId });
-        // O SDK não suporta limit direto em filter, então slice aplicado após
-        // Para paginação real, usar skip/limit quando disponível
-        if (!todasCarregadasRef.current && limite > 0) {
-          cobrancasData = cobrancasData.slice(0, limite);
-        }
-      } else {
-        cobrancasData = await CobrancaAPI.filter({ clienteId });
-        if (!todasCarregadasRef.current) {
-          cobrancasData = cobrancasData.slice(0, COBRANCAS_RECENTES_LIMIT);
-        }
+      let cobrancasData: Cobranca[] = await CobrancaAPI.filter({ clienteId });
+      if (limite && !todasCarregadasRef.current && limite > 0) {
+        cobrancasData = cobrancasData.slice(0, limite);
+      } else if (!todasCarregadasRef.current) {
+        cobrancasData = cobrancasData.slice(0, COBRANCAS_RECENTES_LIMIT);
       }
 
-      // Para cada cobrança, buscar suas parcelas
       const cobrancasComParcelas: CobrancaComParcelas[] = await Promise.all(
-        cobrancasData.map(async (cob) => {
-          const parcelas = await ParcelaAPI.filter({ cobrancaId: cob.id });
-          return { ...cob, parcelas };
-        })
+        cobrancasData.map(async (cob) => ({
+          ...cob,
+          parcelas: await ParcelaAPI.filter({ cobrancaId: cob.id }),
+        })),
       );
-
       cacheRef.current = cobrancasComParcelas;
       setCobrancas(cobrancasComParcelas);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Erro ao carregar cobranças";
-      setError(msg);
-      if (cacheRef.current) {
-        setCobrancas(cacheRef.current);
-      }
+      setError(e instanceof Error ? e.message : "Erro ao carregar cobranças");
+      if (cacheRef.current) setCobrancas(cacheRef.current);
     } finally {
       setLoading(false);
     }
@@ -87,17 +58,21 @@ export function useCharges(clienteId: string | null): UseChargesResult {
   useEffect(() => {
     setTodasCarregadas(false);
     todasCarregadasRef.current = false;
-    fetchCobrancas();
+    void fetchCobrancas();
   }, [fetchCobrancas]);
 
-  // Invalidação por EventBus
   useEffect(() => {
     if (!clienteId) return;
+    const refresh = () => void fetchCobrancas();
     const unsubs = [
-      eventBus.on("charge:created", () => fetchCobrancas()),
-      eventBus.on("charge:updated", () => fetchCobrancas()),
-      eventBus.on("charge:deleted", () => fetchCobrancas()),
-      eventBus.on("parcel:updated", () => fetchCobrancas()),
+      eventBus.on("charge:created", refresh),
+      eventBus.on("charge:updated", refresh),
+      eventBus.on("charge:deleted", refresh),
+      eventBus.on("parcel:updated", refresh),
+      eventBus.on("parcel:paid", refresh),
+      eventBus.on("parcel:charged", refresh),
+      eventBus.on("parcel:archived", refresh),
+      eventBus.on("parcel:unarchived", refresh),
     ];
     return () => unsubs.forEach((u) => u());
   }, [clienteId, fetchCobrancas]);

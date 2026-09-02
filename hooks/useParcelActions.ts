@@ -1,14 +1,4 @@
-// hooks/useParcelActions.ts — Ações de parcela com undo (M6b)
-//
-// PRD v2.0 seção 5 — Performance: sem polling, sem setInterval.
-// Ações: marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar, desarquivar, desfazerPagamento.
-// Cada ação atualiza o backend via Parcela.update e emite evento do EventBus.
-// marcarPago retorna função de undo que restaura o estado anterior.
-//
-// NOTA: marcarPago e marcarParcial fazem atualização direta (Plano v2.0 seção M6b),
-// sem passar por proximoStatus. A máquina de estados (status.rules) valida transições
-// mas a ação de pagamento é direta — o usuário pode marcar como pago de qualquer estado.
-
+// hooks/useParcelActions.ts — Ações de parcela com undo (M6b + correções M15)
 import { useCallback } from "react";
 import { Parcela as ParcelaAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
@@ -38,17 +28,13 @@ export function useParcelActions(): UseParcelActionsResult {
       dataPagamento: parcela.dataPagamento,
       dataCobrancaEnviada: parcela.dataCobrancaEnviada,
     };
-
-    // Atualização direta (Plano v2.0 seção M6b)
-    const dataHoje = hoje();
     await ParcelaAPI.update(parcela.id, {
       status: "pago",
-      dataPagamento: dataHoje,
+      dataPagamento: hoje(),
       valorPago: parcela.valor,
     } as any);
     eventBus.emit("parcel:paid");
 
-    // Função de undo
     return async () => {
       const { camposAtualizar } = desfazerStatus(estadoAnterior);
       await ParcelaAPI.update(parcela.id, camposAtualizar as any);
@@ -57,15 +43,20 @@ export function useParcelActions(): UseParcelActionsResult {
   }, []);
 
   const marcarParcial = useCallback(async (parcela: Parcela, valorRecebido: number): Promise<void> => {
-    const dataHoje = hoje();
-    const valorPagoAtual = parcela.valorPago || 0;
-    const novoValorPago = valorPagoAtual + valorRecebido;
+    if (!Number.isFinite(valorRecebido) || valorRecebido <= 0) {
+      throw new Error("Digite um valor maior que zero");
+    }
+    const valorNormalizado = Math.floor(valorRecebido * 100) / 100;
+    if (valorNormalizado <= 0) {
+      throw new Error("Digite um valor maior que zero");
+    }
 
+    const valorPagoAtual = parcela.valorPago || 0;
+    const novoValorPago = Math.floor((valorPagoAtual + valorNormalizado) * 100) / 100;
     if (novoValorPago >= parcela.valor) {
-      // Trata como total
       await ParcelaAPI.update(parcela.id, {
         status: "pago",
-        dataPagamento: dataHoje,
+        dataPagamento: hoje(),
         valorPago: parcela.valor,
       } as any);
     } else {
@@ -91,29 +82,30 @@ export function useParcelActions(): UseParcelActionsResult {
   }, []);
 
   const arquivar = useCallback(async (parcelaId: string): Promise<void> => {
-    await ParcelaAPI.update(parcelaId, {
-      arquivada: true,
-      status: "arquivado",
-    } as any);
+    // PRD 7.6: arquivamento é flag separado; o status financeiro deve ser preservado.
+    await ParcelaAPI.update(parcelaId, { arquivada: true } as any);
     eventBus.emit("parcel:archived");
   }, []);
 
   const desarquivar = useCallback(async (parcelaId: string): Promise<void> => {
-    // Buscar a parcela para inferir o status anterior
     const parcela = await ParcelaAPI.get(parcelaId) as any;
-    let statusAnterior: string = "pendente";
-    if (parcela.valorPago !== null && parcela.valorPago >= parcela.valor) {
-      statusAnterior = "pago";
-    } else if (parcela.valorPago !== null && parcela.valorPago > 0) {
-      statusAnterior = "pago_parcial";
-    } else if (parcela.dataCobrancaEnviada !== null) {
-      statusAnterior = "cobrado";
+    const patch: Record<string, unknown> = { arquivada: false };
+
+    // Compatibilidade com registros gerados antes da correção M15, quando arquivar
+    // sobrescrevia status='arquivado'. Registros novos apenas limpam o flag.
+    if (parcela.status === "arquivado") {
+      let statusAnterior = "pendente";
+      if (parcela.valorPago !== null && parcela.valorPago >= parcela.valor) {
+        statusAnterior = "pago";
+      } else if (parcela.valorPago !== null && parcela.valorPago > 0) {
+        statusAnterior = "pago_parcial";
+      } else if (parcela.dataCobrancaEnviada !== null) {
+        statusAnterior = "cobrado";
+      }
+      patch.status = statusAnterior;
     }
 
-    await ParcelaAPI.update(parcelaId, {
-      arquivada: false,
-      status: statusAnterior,
-    } as any);
+    await ParcelaAPI.update(parcelaId, patch as any);
     eventBus.emit("parcel:unarchived");
   }, []);
 
@@ -123,13 +115,5 @@ export function useParcelActions(): UseParcelActionsResult {
     eventBus.emit("parcel:updated");
   }, []);
 
-  return {
-    marcarPago,
-    marcarParcial,
-    cobrar,
-    confirmarEnvio,
-    arquivar,
-    desarquivar,
-    desfazerPagamento,
-  };
+  return { marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar, desarquivar, desfazerPagamento };
 }

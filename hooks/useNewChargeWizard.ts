@@ -113,7 +113,7 @@ export function useNewChargeWizard() {
   }, [data.cliente]);
 
   const isPasso1Valid = useMemo(() => {
-    return data.cliente !== null && data.produtoNome.trim().length > 0;
+    return data.cliente !== null && data.produtoNome.trim().length >= 3;
   }, [data.cliente, data.produtoNome]);
 
   const isPasso2Valid = useMemo(() => {

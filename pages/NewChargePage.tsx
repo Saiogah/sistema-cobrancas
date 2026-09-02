@@ -19,6 +19,7 @@ import { podeEditarCobranca } from '../domain/charge.rules';
 import { eventBus } from '../lib/event-bus';
 import { formatarDataBR } from '../lib/date.utils';
 import { formatarMoeda, formatarTelefone } from '../lib/format.utils';
+import { normalizarTelefone, validarTelefone } from '../lib/validation.utils';
 import type { CobrancaInput, CobrancaUpdate } from '../types/charge.types';
 import type { Cliente } from '../types/client.types';
 import type { ProdutoServico } from '../types/product.types';
@@ -54,8 +55,39 @@ export function NewChargePage({
   const [carregandoEdicao, setCarregandoEdicao] = useState(editMode);
   const [edicaoCompleta, setEdicaoCompleta] = useState(true);
   const [edicaoConcluida, setEdicaoConcluida] = useState(false);
+  const [clientesRecentesIds, setClientesRecentesIds] = useState<string[]>([]);
 
   const hydrateData = wizard.hydrateData;
+
+  useEffect(() => {
+    if (editMode) return;
+    let cancelled = false;
+    async function carregarRecentes() {
+      try {
+        const cobrancas = await CobrancaAPI.list({ sort: '-created_date' });
+        const ids: string[] = [];
+        for (const cobranca of cobrancas) {
+          if (!ids.includes(cobranca.clienteId)) ids.push(cobranca.clienteId);
+          if (ids.length >= 5) break;
+        }
+        if (!cancelled) setClientesRecentesIds(ids);
+      } catch {
+        if (!cancelled) setClientesRecentesIds([]);
+      }
+    }
+    void carregarRecentes();
+    const offCreated = eventBus.on('charge:created', carregarRecentes);
+    return () => { cancelled = true; offCreated(); };
+  }, [editMode]);
+
+  const clientesParaAutocomplete = [...clientes].sort((a, b) => {
+    const ia = clientesRecentesIds.indexOf(a.id);
+    const ib = clientesRecentesIds.indexOf(b.id);
+    if (ia === -1 && ib === -1) return 0;
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
 
   useEffect(() => {
     if (!editMode) {
@@ -120,7 +152,11 @@ export function NewChargePage({
   }, [wizard, editMode, onEditSuccess]);
 
   const handleCreateClient = useCallback(async (nome: string, telefone: string): Promise<Cliente> => {
-    const newClient = await ClienteAPI.create({ nome, telefone, ativo: true });
+    const telefoneNormalizado = normalizarTelefone(telefone);
+    if (!nome.trim() || !validarTelefone(telefoneNormalizado)) {
+      throw new Error('Informe nome e telefone válido com DDD.');
+    }
+    const newClient = await ClienteAPI.create({ nome: nome.trim(), telefone: telefoneNormalizado, ativo: true });
     eventBus.emit('client:created');
     await refreshClientes();
     return newClient;
@@ -300,7 +336,7 @@ export function NewChargePage({
           wizard.clienteSugerido && !editMode ? React.createElement('button', { type: 'button', onClick: () => handleSelectClient(wizard.clienteSugerido!), className: 'w-full rounded-md border border-primary/30 bg-primary/5 p-3 text-left hover:bg-primary/10' },
             React.createElement('span', { className: 'block text-xs font-medium text-primary' }, 'ÚLTIMO CLIENTE'),
             React.createElement('span', { className: 'block text-sm font-medium text-foreground' }, wizard.clienteSugerido.nome)) : null,
-          !editMode ? React.createElement(ClientAutocomplete, { clientes, onSelect: handleSelectClient, onCreateNew: handleCreateClient }) : null)),
+          !editMode ? React.createElement(ClientAutocomplete, { clientes: clientesParaAutocomplete, onSelect: handleSelectClient, onCreateNew: handleCreateClient }) : null)),
       React.createElement('div', { className: 'space-y-2' },
         React.createElement('label', { className: 'block text-sm font-medium text-foreground' }, 'Produto ou Serviço'),
         data.produtoNome ? React.createElement('div', { className: 'flex items-center justify-between p-3 rounded-md border bg-muted/30' },
