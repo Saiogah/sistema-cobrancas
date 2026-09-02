@@ -10,3 +10,7 @@ conversations/
 entities/
 config/
 *.gitattributes
+.agents/.env
+.npm/
+__pycache__/
+.cache/
