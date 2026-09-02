@@ -9,13 +9,21 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@/*": ["./*"]
+    }
   },
   "include": [
+    "App.tsx",
     "components/**/*.tsx",
+    "hooks/**/*.ts",
     "lib/**/*.ts",
     "types/**/*.ts",
     "config/**/*.ts",
-    "services/**/*.ts"
+    "services/**/*.ts",
+    "domain/**/*.ts",
+    "api/**/*.ts",
+    "pages/**/*.tsx"
   ]
 }

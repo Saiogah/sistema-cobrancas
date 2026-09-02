@@ -1,14 +1,13 @@
 node_modules/
 *.log
 .env
+.env.local
 .DS_Store
 dist/
 build/
 conversations/
 .agents/
 .base44-conversation-workspace/
-entities/
-config/
 *.gitattributes
 .agents/.env
 .npm/
