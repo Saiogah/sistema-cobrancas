@@ -165,8 +165,18 @@ async function runTransaction<T>(
 ): Promise<T> {
   const db = await getDB();
   const tx = db.transaction(storeNames, mode);
+
+  // AL-03 fix: aguardar oncomplete/onerror/onabort antes de resolver
+  const txDone = new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('Transaction aborted'));
+  });
+
   try {
     const result = await fn(tx);
+    // Aguarda a transação commitar de fato antes de retornar o resultado
+    await txDone;
     return result;
   } catch (err) {
     try {
@@ -375,7 +385,7 @@ export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate
         clienteId: input.clienteId,
         produtoServicoId: input.produtoServicoId ?? null,
         nomeProdutoServico: input.nomeProdutoServico,
-        valor: input.valor,
+        valor: Math.round(input.valor * 100) / 100,
         formaPagamento: input.formaPagamento,
         quantidadeParcelas: input.quantidadeParcelas,
         primeiroVencimento: input.primeiroVencimento,
@@ -427,7 +437,7 @@ export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate
   },
 
   async update(id: string, patch: CobrancaUpdate): Promise<CobrancaType> {
-    return runTransaction(['cobrancas', 'parcelas'], 'readwrite', async (tx) => {
+    return runTransaction(['cobrancas', 'parcelas', 'produtos_servicos'], 'readwrite', async (tx) => {
       const cobranca = await getFromStore<CobrancaType>('cobrancas', id, tx);
       if (!cobranca) {
         throw new Error(`Cobrança com id "${id}" não encontrada`);
@@ -447,13 +457,33 @@ export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate
           await deleteFromStore('parcelas', p.id, tx);
         }
 
+        const valorTruncado = patch.valor !== undefined ? Math.round(patch.valor * 100) / 100 : cobranca.valor;
         updatedCobranca = {
           ...cobranca,
           ...patch,
+          valor: valorTruncado,
           updated_date: now,
         };
 
         await putToStore('cobrancas', updatedCobranca, tx);
+
+        // AL-05 fix: ajustar vezesUsado se o produto foi trocado
+        if (patch.produtoServicoId !== undefined && patch.produtoServicoId !== cobranca.produtoServicoId) {
+          // Decrement old produto
+          if (cobranca.produtoServicoId) {
+            const oldProd = await getFromStore<ProdutoServicoType>('produtos_servicos', cobranca.produtoServicoId, tx);
+            if (oldProd) {
+              await putToStore('produtos_servicos', { ...oldProd, vezesUsado: Math.max(0, (oldProd.vezesUsado || 0) - 1), updated_date: now }, tx);
+            }
+          }
+          // Increment new produto
+          if (patch.produtoServicoId) {
+            const newProd = await getFromStore<ProdutoServicoType>('produtos_servicos', patch.produtoServicoId, tx);
+            if (newProd) {
+              await putToStore('produtos_servicos', { ...newProd, vezesUsado: (newProd.vezesUsado || 0) + 1, updated_date: now }, tx);
+            }
+          }
+        }
 
         // Regenerate new parcelas
         const newParcelasInput = gerarParcelas({
@@ -493,6 +523,7 @@ export const Cobranca: BaseEntityApi<CobrancaType, CobrancaInput, CobrancaUpdate
           ...cobranca,
           ...(patch.observacoes !== undefined ? { observacoes: patch.observacoes } : {}),
           ...(patch.pixUtilizado !== undefined ? { pixUtilizado: patch.pixUtilizado } : {}),
+          valor: Math.round(cobranca.valor * 100) / 100,
           updated_date: now,
         };
 

@@ -21,10 +21,15 @@ function ChargeCardBase(props: ChargeCardProps) {
   const [expandido, setExpandido] = useState(false);
   const [menuPago, setMenuPago] = useState(false);
   const [valorParcial, setValorParcial] = useState("");
+  // CR-03 fix: rastreia se o WhatsApp foi aberto para mostrar "Confirmar envio"
+  const [cobrancaAberta, setCobrancaAberta] = useState(false);
   const dataHoje = hoje();
   const atrasada = isAtrasada(parcela, dataHoje);
   const dias = atrasada ? diasAtraso(parcela, dataHoje) : 0;
   const isPP = parcela.status === "pago_parcial";
+
+  // AL-07 fix: cobrado não deve mostrar cor de atrasado
+  const mostrarAtraso = atrasada && parcela.status !== "cobrado";
 
   const handleMarcarTotal = useCallback(() => { setMenuPago(false); props.onMarkPaid?.(parcela.id); }, [parcela.id, props]);
   const handleMarcarParcial = useCallback(() => {
@@ -32,7 +37,23 @@ function ChargeCardBase(props: ChargeCardProps) {
     if (!isNaN(v) && v > 0) { setMenuPago(false); setValorParcial(""); props.onMarkPartial?.(parcela.id, v); }
   }, [valorParcial, props]);
 
-  return React.createElement("div", { className: `rounded-lg border bg-card p-3 ${atrasada ? (dias <= 3 ? "border-orange-300" : "border-red-400") : ""}` },
+  const handleCobrar = useCallback((e: any) => {
+    e.stopPropagation();
+    props.onCharge?.(parcela);
+    setCobrancaAberta(true);
+  }, [parcela, props]);
+
+  // Determina se deve mostrar "Confirmar envio":
+  // - status persistido === "cobrado" (já confirmado antes)
+  // - OU acabou de abrir o WhatsApp (cobrancaAberta === true)
+  const mostrarConfirmarEnvio = parcela.status === "cobrado" || (parcela.status === "pendente" && cobrancaAberta);
+
+  // AL-06 fix: parcela pago_parcial também pode ser cobrada
+  const podeCobrar = parcela.status === "pendente" || parcela.status === "pago_parcial";
+
+  return React.createElement("div", {
+    className: `rounded-lg border bg-card p-3 ${mostrarAtraso ? (dias <= 3 ? "border-orange-300" : "border-red-400") : ""}`
+  },
     React.createElement("div", { className: "flex items-center gap-3" },
       props.onSelect ? React.createElement("button", {
         onClick: (e: any) => { e.stopPropagation(); props.onSelect?.(parcela.id); },
@@ -44,14 +65,36 @@ function ChargeCardBase(props: ChargeCardProps) {
       ),
       React.createElement("div", { className: "flex flex-col items-end gap-1" },
         React.createElement("span", { className: "font-semibold text-foreground" }, formatarMoeda(parcela.valor)),
-        atrasada ? React.createElement("span", { className: "text-xs text-red-600" }, `Atrasada há ${dias} ${dias === 1 ? "dia" : "dias"}`)
-          : isPP ? React.createElement("span", { className: "text-xs text-blue-600" }, `R$ ${formatarMoeda(parcela.valorPago || 0)} de ${formatarMoeda(parcela.valor)}`)
+        // AL-07 fix: cobrado mostra badge amarelo em vez de atrasado
+        mostrarAtraso ? React.createElement("span", { className: "text-xs text-red-600" }, `Atrasada há ${dias} ${dias === 1 ? "dia" : "dias"}`)
+          : isPP ? React.createElement("span", { className: "text-xs text-blue-600" },
+              // AL-08 fix: formatarMoeda já inclui R$, não duplicar
+              `${formatarMoeda(parcela.valorPago || 0)} de ${formatarMoeda(parcela.valor)}`)
+          : parcela.status === "cobrado" ? React.createElement(StatusBadge, { status: "cobrado" })
           : React.createElement(StatusBadge, { status: parcela.status }),
       ),
     ),
     parcela.status !== "pago" && parcela.status !== "arquivado" ? React.createElement("div", { className: "flex items-center gap-2 mt-2 flex-wrap" },
-      parcela.status === "pendente" ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); props.onCharge?.(parcela); }, className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent" }, "💬 Cobrar") : null,
-      parcela.status === "cobrado" ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); props.onConfirmSend?.(parcela.id); }, className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent" }, "✓ Confirmar envio") : null,
+      // CR-03 + AL-06: Cobrar aparece para pendente e pago_parcial
+      podeCobrar && !mostrarConfirmarEnvio ? React.createElement("button", {
+        onClick: handleCobrar,
+        className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent"
+      }, "💬 Cobrar") : null,
+      // "Confirmar envio" aparece após abrir WhatsApp (UI state) ou se já está cobrado
+      mostrarConfirmarEnvio && parcela.status === "pendente" ? React.createElement("button", {
+        onClick: (e: any) => { e.stopPropagation(); props.onConfirmSend?.(parcela.id); },
+        className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent"
+      }, "✓ Confirmar envio") : null,
+      // Se já está cobrado, mostra Confirmar envio (re-confirmar)
+      parcela.status === "cobrado" ? React.createElement("button", {
+        onClick: (e: any) => { e.stopPropagation(); props.onConfirmSend?.(parcela.id); },
+        className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent"
+      }, "✓ Confirmar envio") : null,
+      // AL-06: Cobrar para pago_parcial também (quando não há cobranca aberta)
+      parcela.status === "pago_parcial" && !cobrancaAberta ? React.createElement("button", {
+        onClick: handleCobrar,
+        className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent"
+      }, "💬 Cobrar saldo") : null,
       !menuPago ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setMenuPago(true); }, className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent" }, "Marcar pago")
         : React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
             React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarTotal(); }, className: "rounded-md bg-emerald-100 text-emerald-700 px-2.5 py-1 text-xs font-medium" }, "Pagamento total"),

@@ -50,7 +50,7 @@ export function useDashboard(): UseDashboardResult {
       const clientesAtivosIds = new Set(
         todosClientes.filter((c: any) => c.ativo === true).map((c: any) => c.id)
       );
-      const todasParcelas = await ParcelaAPI.list({ limit: 500 });
+      const todasParcelas = await ParcelaAPI.list({ sort: "dataVencimento" });
       const parcelasFiltradas = todasParcelas.filter((p: any) =>
         !p.arquivada &&
         p.dataVencimento <= limiteSuperior &&

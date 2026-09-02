@@ -1,3 +1,4 @@
+// lib/backup.ts — Exportar/importar/limpar dados (backup local IndexedDB)
 import { Cliente, ProdutoServico, Cobranca, Parcela, Configuracao } from '../api/entities';
 
 export interface BackupData {
@@ -6,24 +7,24 @@ export interface BackupData {
   data: {
     clientes: any[];
     produtosServicos: any[];
-    cobrancas: any[];
+    cobranca: any[];
     parcelas: any[];
     configuracoes: any[];
   };
 }
 
 /**
- * Lê todos os registros de todas as entidades (Cliente, ProdutoServico, Cobranca, Parcela, Configuracao)
- * via a API de entidades, agrupa em um objeto JSON com timestamp e versão,
- * e dispara o download do navegador.
+ * Lê todos os registros de todas as entidades via a API de entidades,
+ * agrupa em um objeto JSON com timestamp e versão, e dispara o download do navegador.
+ * CR-02 fix: falhas na leitura agora lançam erro em vez de silenciosamente retornar [].
  */
 export async function exportarDados(): Promise<void> {
   const [clientes, produtosServicos, cobrancas, parcelas, configuracoes] = await Promise.all([
-    Cliente.list().catch(() => []),
-    ProdutoServico.list().catch(() => []),
-    Cobranca.list().catch(() => []),
-    Parcela.list().catch(() => []),
-    Configuracao.list().catch(() => []),
+    Cliente.list(),
+    ProdutoServico.list(),
+    Cobranca.list(),
+    Parcela.list(),
+    Configuracao.list(),
   ]);
 
   const data: BackupData = {
@@ -32,7 +33,7 @@ export async function exportarDados(): Promise<void> {
     data: {
       clientes: clientes || [],
       produtosServicos: produtosServicos || [],
-      cobrancas: cobrancas || [],
+      cobranca: cobrancas || [],
       parcelas: parcelas || [],
       configuracoes: configuracoes || [],
     },
@@ -49,75 +50,21 @@ export async function exportarDados(): Promise<void> {
 
 /**
  * Apaga TODOS os registros de todas as entidades (nuclear reset).
+ * CR-02 fix: usa transação direta do IndexedDB em vez de Parcela.delete/Cobranca.delete
+ * que têm regras de negócio que impedem a limpeza.
  */
 export async function limparDados(): Promise<void> {
-  const [clientes, produtosServicos, cobrancas, parcelas, configuracoes] = await Promise.all([
-    Cliente.list().catch(() => []),
-    ProdutoServico.list().catch(() => []),
-    Cobranca.list().catch(() => []),
-    Parcela.list().catch(() => []),
-    Configuracao.list().catch(() => []),
-  ]);
-
-  // Apaga parcelas
-  for (const item of parcelas) {
-    if (item?.id) {
-      try {
-        await Parcela.delete(item.id);
-      } catch {
-        // Ignora erros caso delete individual não seja permitido
-      }
-    }
-  }
-
-  // Apaga cobranças
-  for (const item of cobrancas) {
-    if (item?.id) {
-      try {
-        await Cobranca.delete(item.id);
-      } catch {
-        // Ignora erros
-      }
-    }
-  }
-
-  // Apaga produtos e serviços
-  for (const item of produtosServicos) {
-    if (item?.id) {
-      try {
-        await ProdutoServico.delete(item.id);
-      } catch {
-        // Ignora erros
-      }
-    }
-  }
-
-  // Apaga clientes
-  for (const item of clientes) {
-    if (item?.id) {
-      try {
-        await Cliente.delete(item.id);
-      } catch {
-        // Ignora erros
-      }
-    }
-  }
-
-  // Apaga configurações
-  for (const item of configuracoes) {
-    if (item?.id) {
-      try {
-        await Configuracao.delete(item.id);
-      } catch {
-        // Ignora erros
-      }
-    }
-  }
+  // Importa o driver raw do IndexedDB — precisamos de acesso direto para limpar stores
+  // sem passar pelas regras de negócio (que bloqueiam delete de parcelas, etc.)
+  const { clearAllStores } = await import('./backup-driver');
+  await clearAllStores();
 }
 
 /**
  * Analisa a string JSON, valida se possui o formato esperado,
  * limpa os dados existentes e importa todos os registros do backup.
+ * CR-02 fix: preserva IDs originais, status, valorPago, arquivamento, etc.
+ * Usa put direto no IndexedDB em vez de create() que regenera parcelas.
  */
 export async function importarDados(jsonStr: string): Promise<void> {
   let parsed: any;
@@ -139,7 +86,10 @@ export async function importarDados(jsonStr: string): Promise<void> {
     : Array.isArray(dataPayload.produtos)
     ? dataPayload.produtos
     : [];
-  const cobrancas = Array.isArray(dataPayload.cobrancas) ? dataPayload.cobrancas : [];
+  // Aceita tanto "cobrancas" quanto "cobranca" como chave
+  const cobrancas = Array.isArray(dataPayload.cobrancas) ? dataPayload.cobrancas
+    : Array.isArray(dataPayload.cobranca) ? dataPayload.cobranca
+    : [];
   const parcelas = Array.isArray(dataPayload.parcelas) ? dataPayload.parcelas : [];
   const configuracoes = Array.isArray(dataPayload.configuracoes)
     ? dataPayload.configuracoes
@@ -154,6 +104,7 @@ export async function importarDados(jsonStr: string): Promise<void> {
     'produtosServicos' in dataPayload ||
     'produtos' in dataPayload ||
     'cobrancas' in dataPayload ||
+    'cobranca' in dataPayload ||
     'parcelas' in dataPayload ||
     'configuracoes' in dataPayload;
 
@@ -161,53 +112,40 @@ export async function importarDados(jsonStr: string): Promise<void> {
     throw new Error('O arquivo de backup não contém um formato de dados reconhecido.');
   }
 
+  // Importa o driver raw para fazer put preservando IDs
+  const { putRecord, clearAllStores } = await import('./backup-driver');
+
   // Apaga dados existentes
-  await limparDados();
+  await clearAllStores();
 
-  // Importa Clientes
+  // Importa preservando IDs e estado original (status, valorPago, etc.)
   for (const item of clientes) {
-    try {
-      await Cliente.create(item);
-    } catch {
-      // Ignora se não for possível criar
+    if (item?.id) {
+      try { await putRecord('clientes', item); } catch { /* skip invalid */ }
     }
   }
 
-  // Importa Produtos e Serviços
   for (const item of produtosServicos) {
-    try {
-      await ProdutoServico.create(item);
-    } catch {
-      // Ignora erro
+    if (item?.id) {
+      try { await putRecord('produtos_servicos', item); } catch { /* skip invalid */ }
     }
   }
 
-  // Importa Configurações
-  for (const item of configuracoes) {
-    try {
-      if (item.diasTrabalhados) {
-        await Configuracao.create({ diasTrabalhados: item.diasTrabalhados });
-      }
-    } catch {
-      // Ignora erro
-    }
-  }
-
-  // Importa Cobranças
   for (const item of cobrancas) {
-    try {
-      await Cobranca.create(item);
-    } catch {
-      // Ignora erro
+    if (item?.id) {
+      try { await putRecord('cobrancas', item); } catch { /* skip invalid */ }
     }
   }
 
-  // Importa Parcelas
   for (const item of parcelas) {
-    try {
-      await Parcela.create(item);
-    } catch {
-      // Ignora erro
+    if (item?.id) {
+      try { await putRecord('parcelas', item); } catch { /* skip invalid */ }
+    }
+  }
+
+  for (const item of configuracoes) {
+    if (item?.id) {
+      try { await putRecord('configuracoes', item); } catch { /* skip invalid */ }
     }
   }
 }
