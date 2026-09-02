@@ -15,6 +15,7 @@
     }
   },
   "include": [
+    "main.tsx",
     "App.tsx",
     "components/**/*.tsx",
     "hooks/**/*.ts",
