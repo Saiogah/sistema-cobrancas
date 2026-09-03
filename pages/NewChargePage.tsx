@@ -166,8 +166,8 @@ export function NewChargePage({
     wizard.updateData({ cliente });
   }, [wizard]);
 
-  const handleCreateProduct = useCallback(async (nome: string, valor: number): Promise<ProdutoServico> => {
-    const newProduct = await ProdutoAPI.create({ nome, valorPadrao: valor, vezesUsado: 0 });
+  const handleCreateProduct = useCallback(async (nome: string, valor: number | null): Promise<ProdutoServico> => {
+    const newProduct = await ProdutoAPI.create({ nome, valorPadrao: valor ?? undefined, vezesUsado: 0 });
     eventBus.emit('product:created');
     await refreshProdutos();
     return newProduct;

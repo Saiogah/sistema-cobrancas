@@ -47,8 +47,9 @@ function MainApp() {
   }, [refreshCounts]);
   useEffect(() => {
     if (!counts) return;
-    if (counts.cobrancas > 0) setOnboardingAtivo(false);
-    else if (counts.clientes === 0 && counts.produtos === 0) setOnboardingAtivo(true);
+    // MÉD-05 fix (PRD): a experiência guiada termina apenas após a primeira cobrança,
+    // não quando cliente/produto são criados. Sobrevive a reloads intermediários.
+    setOnboardingAtivo(counts.cobrancas === 0);
   }, [counts]);
 
   return React.createElement('div', { className: 'min-h-screen bg-background text-foreground' },

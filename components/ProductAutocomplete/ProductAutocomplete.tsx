@@ -9,7 +9,7 @@ export interface ProductAutocompleteProps {
   onSelect: (produto: ProdutoServico | { nome: string; produtoServicoId: null }) => void;
   produtos: ProdutoServico[];
   allowVendaAvulsa?: boolean;
-  onCreateNew?: (nome: string, valor: number) => Promise<ProdutoServico>;
+  onCreateNew?: (nome: string, valor: number | null) => Promise<ProdutoServico>;
 }
 
 function ProductAutocompleteBase(props: ProductAutocompleteProps) {
@@ -42,8 +42,9 @@ function ProductAutocompleteBase(props: ProductAutocompleteProps) {
 
   const handleCriar = useCallback(async () => {
     if (!novoNome.trim() || !props.onCreateNew) return;
-    const v = parseFloat(novoValor.replace(",", ".")) || 0;
-    const p = await props.onCreateNew(novoNome, v);
+    const v = parseFloat(novoValor.replace(",", "."));
+    const valorFinal = Number.isFinite(v) && v > 0 ? v : null;
+    const p = await props.onCreateNew(novoNome, valorFinal);
     handleSelecionar(p);
     setNovoNome(""); setNovoValor("");
   }, [novoNome, novoValor, props, handleSelecionar]);

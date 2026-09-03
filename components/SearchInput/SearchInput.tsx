@@ -13,7 +13,7 @@ interface SearchInputProps {
 }
 
 /**
- * Input de busca com debounce de 300ms (DEBOUNCE_SEARCH).
+ * Input de busca com debounce de 150ms (DEBOUNCE_SEARCH).
  * Ícone de lupa à esquerda e botão limpar (X) à direita.
  * O callback onChange só dispara após o debounce, não a cada tecla.
  */

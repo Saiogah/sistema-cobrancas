@@ -113,10 +113,12 @@ export function useDashboard(): UseDashboardResult {
       eventBus.on("parcel:charged", () => fetchDashboard()),
       eventBus.on("parcel:archived", () => fetchDashboard()),
       eventBus.on("parcel:unarchived", () => fetchDashboard()),
+      eventBus.on("parcel:updated", () => fetchDashboard()),
       eventBus.on("charge:created", () => fetchDashboard()),
       eventBus.on("charge:updated", () => fetchDashboard()),
       eventBus.on("charge:deleted", () => fetchDashboard()),
       eventBus.on("client:inactivated", () => fetchDashboard()),
+      eventBus.on("client:updated", () => fetchDashboard()),
     ];
     return () => unsubs.forEach((u) => u());
   }, [fetchDashboard]);

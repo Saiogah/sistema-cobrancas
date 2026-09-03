@@ -144,7 +144,7 @@ export function SettingsPage() {
 
       {/* Texto explicativo */}
       <p className="text-xs text-muted-foreground leading-relaxed">
-        As cobranças que vencerem em dias não trabalhados aparecerão no próximo dia trabalhado.
+        Referência para seus dias de trabalho. O cálculo de atraso considera apenas a data de vencimento.
       </p>
 
       {/* Botão Salvar */}

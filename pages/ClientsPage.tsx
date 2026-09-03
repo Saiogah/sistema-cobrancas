@@ -158,6 +158,9 @@ function ClientCard(props: ClientCardProps) {
   }, [parcelActions, patchParcelaLocal, refreshCharges]);
 
   const desfazerPagamentoOptimista = useCallback(async (par: Parcela) => {
+    // MÉD-01 fix (PRD §10.6): desfazer manual exige confirmação
+    const confirmado = window.confirm('Desfazer o pagamento desta parcela e voltar ao status anterior?');
+    if (!confirmado) return;
     const anterior = { status: par.status, valorPago: par.valorPago, dataPagamento: par.dataPagamento };
     const est: EstadoAnterior = {
       status: par.dataCobrancaEnviada ? "cobrado" : "pendente",

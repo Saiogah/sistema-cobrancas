@@ -17,6 +17,7 @@ import { isAtrasada } from "../domain/overdue.rules";
 import type { Parcela } from "../types/parcel.types";
 import type { Cobranca } from "../types/charge.types";
 import type { Cliente } from "../types/client.types";
+import type { EstadoAnterior } from "../types/common.types";
 
 interface DashboardItem {
   parcela: Parcela;
@@ -33,7 +34,7 @@ function toMap<T extends { id: string }>(items: T[]): Record<string, T> {
 
 export function DashboardPage() {
   const { parcelasHoje, parcelasAtrasadas, proximosVencimentos, loading, error, refresh } = useDashboard();
-  const { marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar } = useParcelActions();
+  const { marcarPago, marcarParcial, cobrar, confirmarEnvio, arquivar, desfazerPagamento } = useParcelActions();
   const batch = useBatchSelect();
   const [busca, setBusca] = useState("");
   const [dadosCobrancas, setDadosCobrancas] = useState<Record<string, Cobranca>>({});
@@ -192,11 +193,37 @@ export function DashboardPage() {
       await marcarParcial(anterior, recebido);
       await refresh();
       clearOverride(parcelaId);
+
+      // AL-10 fix: undo de 5s que restaura o estado parcial exato anterior
+      const estadoAnterior: EstadoAnterior = {
+        status: anterior.status,
+        valorPago: anterior.valorPago,
+        dataPagamento: anterior.dataPagamento,
+        dataCobrancaEnviada: anterior.dataCobrancaEnviada,
+      };
+      const virouPago = novoPago >= anterior.valor;
+      const performUndo = async () => {
+        setOverride(parcelaId, anterior);
+        try {
+          await desfazerPagamento(parcelaId, estadoAnterior);
+          await refresh();
+          clearOverride(parcelaId);
+        } catch {
+          clearOverride(parcelaId);
+          showError("Erro ao desfazer pagamento.", () => void performUndo());
+        }
+      };
+      setUndoToast({
+        message: virouPago
+          ? `${dadosClientes[anterior.clienteId]?.nome || "Cliente"} — ${formatarMoeda(anterior.valor)} pago.`
+          : `Recebido ${formatarMoeda(recebido)} de ${formatarMoeda(anterior.valor)}.`,
+        onUndo: () => void performUndo(),
+      });
     } catch {
       clearOverride(parcelaId);
       showError("Erro ao registrar pagamento parcial.", () => void handleMarkPartial(parcelaId, valorRecebido));
     }
-  }, [allItems, marcarParcial, refresh, clearOverride, setOverride, showError]);
+  }, [allItems, marcarParcial, desfazerPagamento, refresh, clearOverride, setOverride, showError, dadosClientes]);
 
   const handleArchive = useCallback(async (parcelaId: string) => {
     const anterior = allItems.find(i => i.parcela.id === parcelaId)?.parcela;

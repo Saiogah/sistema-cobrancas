@@ -16,6 +16,7 @@
   },
   "include": [
     "main.tsx",
+    "vite-env.d.ts",
     "App.tsx",
     "components/**/*.tsx",
     "hooks/**/*.ts",

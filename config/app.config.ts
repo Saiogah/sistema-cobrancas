@@ -13,7 +13,7 @@ export const UNDO_TIMEOUT = 5000;
 export const TOAST_DURATION = 5000;
 
 /** Debounce em milissegundos para inputs de busca */
-export const DEBOUNCE_SEARCH = 300;
+export const DEBOUNCE_SEARCH = 150;
 
 /** Número de cobranças recentes exibidas no histórico do cliente (PRD v2.0 seção 13.12) */
 export const COBRANCAS_RECENTES_LIMIT = 5;

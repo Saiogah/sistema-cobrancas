@@ -43,6 +43,7 @@ export interface CobrancaUpdate {
   primeiroVencimento?: string;
   diaVencimentoFixo?: DiaVencimento;
   formaPagamento?: FormaPagamento;
+  produtoServicoId?: string | null;
 }
 
 /** Resposta da backend function createCobranca */
