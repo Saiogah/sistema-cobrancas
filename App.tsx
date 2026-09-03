@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 import { DashboardPage } from './pages/DashboardPage';
 import { NewChargePage } from './pages/NewChargePage';
+import type { NewChargePageProps } from './pages/NewChargePage';
 import { ClientsPage } from './pages/ClientsPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -89,7 +90,7 @@ function NewChargeRoute() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const cobrancaId = params.get('editar') || undefined;
-  return React.createElement(NewChargePage, {
+  return React.createElement<NewChargePageProps>(NewChargePage, {
     editMode: Boolean(cobrancaId), cobrancaId,
     onVoltarParaHoje: () => navigate('/'), onEditSuccess: () => navigate('/clientes'),
   });

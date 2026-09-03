@@ -14,3 +14,4 @@ conversations/
 __pycache__/
 .cache/
 incoming_files/
+package-lock.json
