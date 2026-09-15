@@ -6,7 +6,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Parcela as ParcelaAPI, Cliente as ClienteAPI, Cobranca as CobrancaAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
 import { formatarMoeda } from "../lib/format.utils";
-import { formatarDataCurta, hoje } from "../lib/date.utils";
+import { formatarDataBR, hoje } from "../lib/date.utils";
 import { isAtrasada, diasAtraso } from "../domain/overdue.rules";
 import { useParcelActions } from "../hooks/useParcelActions";
 import { SearchInput } from "../components/SearchInput";
@@ -68,6 +68,7 @@ export function CobrancasPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
+  const [expandidasCobrancas, setExpandidasCobrancas] = useState<Record<string, boolean>>({});
   const [processando, setProcessando] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ message: string; retry: () => void } | null>(null);
   const parcelActions = useParcelActions();
@@ -143,6 +144,10 @@ export function CobrancasPage() {
 
   const toggleCliente = useCallback((clienteId: string) => {
     setExpandidos(prev => ({ ...prev, [clienteId]: !prev[clienteId] }));
+  }, []);
+
+  const toggleCobranca = useCallback((cobrancaId: string) => {
+    setExpandidasCobrancas(prev => ({ ...prev, [cobrancaId]: !prev[cobrancaId] }));
   }, []);
 
   const dataHoje = hoje();
@@ -229,10 +234,26 @@ export function CobrancasPage() {
               // Expandido: cobranças/produtos com suas parcelas
               aberto ? React.createElement("div", { className: "px-3 pb-3 flex flex-col gap-3" },
                 ...g.cobrancas.map(cb => {
-                  const total = cobrancas[cb.parcelas[0].parcela.cobrancaId]?.quantidadeParcelas || 1;
-                  return React.createElement("div", { key: cb.nome + cb.parcelas[0].parcela.cobrancaId, className: "flex flex-col" },
-                    React.createElement("span", { className: "text-xs font-medium text-muted-foreground" },
-                      `${cb.nome} (${cb.parcelas.length})`),
+                  const cobrancaId = cb.parcelas[0].parcela.cobrancaId;
+                  const cob = cobrancas[cobrancaId];
+                  const total = cob?.quantidadeParcelas || 1;
+                  const pagasCb = cb.parcelas.filter(x => x.parcela.status === "pago").length;
+                  const abertasCb = cb.parcelas.filter(x => x.parcela.status !== "pago" && !x.parcela.arquivada).length;
+                  const aberta = !!expandidasCobrancas[cobrancaId];
+                  return React.createElement("div", { key: cobrancaId, className: "rounded-md border" },
+                    // Cabeçalho da cobrança: resumo derivado (valor total original = Cobranca.valor)
+                    React.createElement("div", {
+                      className: "flex items-center justify-between gap-2 p-2 cursor-pointer hover:bg-accent rounded-md",
+                      onClick: () => toggleCobranca(cobrancaId),
+                    },
+                      React.createElement("div", { className: "flex-1 min-w-0" },
+                        React.createElement("span", { className: "text-sm font-medium block truncate" }, cb.nome),
+                        React.createElement("span", { className: "text-xs text-muted-foreground" },
+                          `${formatarMoeda(cob?.valor || 0)} · ${cb.parcelas.length} parcela${cb.parcelas.length > 1 ? "s" : ""} · ${pagasCb} paga${pagasCb === 1 ? "" : "s"} · ${abertasCb} em aberto`),
+                      ),
+                      React.createElement("span", { className: "text-muted-foreground text-xs" }, aberta ? "▾" : "▸"),
+                    ),
+                    aberta ? React.createElement("div", { className: "px-2 pb-2 flex flex-col" },
                     ...cb.parcelas.map(({ parcela: p, categoria }) => {
                       const pago = p.valorPago || 0;
                       const saldo = p.valor - pago;
@@ -240,7 +261,7 @@ export function CobrancasPage() {
                       return React.createElement("div", { key: p.id, className: "py-1.5 border-t first:border-t-0" },
                         React.createElement("div", { className: "flex items-center justify-between gap-2" },
                           React.createElement("span", { className: "text-sm truncate" },
-                            `${p.numeroParcela}/${total} · ${formatarDataCurta(p.dataVencimento)} · ${formatarMoeda(p.valor)}`),
+                            `${p.numeroParcela}/${total} · ${formatarDataBR(p.dataVencimento)} · ${formatarMoeda(p.valor)}`),
                           React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" },
                             renderBadge(p, categoria, dataHoje),
                             !isPago && !p.arquivada ? React.createElement("button", {
@@ -260,6 +281,7 @@ export function CobrancasPage() {
                           `Pago: ${formatarMoeda(pago)} · Saldo: ${formatarMoeda(saldo)}`),
                       );
                     }),
+                    ) : null,
                   );
                 }),
               ) : null,
