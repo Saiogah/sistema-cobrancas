@@ -135,7 +135,7 @@ export function DashboardPage() {
     const cliente = dadosClientes[parcela.clienteId];
     if (!cobranca || !cliente) return;
     // "Cobrar" não persiste nada por definição do PRD; a persistência ocorre em Confirmar envio.
-    window.open(cobrar(parcela, cobranca, cliente), "_blank");
+    void cobrar(parcela, cobranca, cliente).then(link => window.open(link, "_blank"));
   }, [dadosCobrancas, dadosClientes, cobrar]);
 
   const handleConfirmSend = useCallback(async (parcelaId: string) => {
@@ -326,7 +326,7 @@ export function DashboardPage() {
 
   const handleOverlayCharge = useCallback((parcela: Parcela) => {
     const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcela.id);
-    if (item?.cobranca && item?.cliente) window.open(cobrar(item.parcela, item.cobranca, item.cliente), "_blank");
+    if (item?.cobranca && item?.cliente) void cobrar(item.parcela, item.cobranca, item.cliente).then(link => window.open(link, "_blank"));
   }, [overlayVencimento, cobrar]);
 
   const handleOverlayConfirmSend = useCallback((parcelaId: string) =>

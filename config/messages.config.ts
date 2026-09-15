@@ -50,3 +50,15 @@ export function selecionarTemplate(
   if (isAtrasada) return "atrasada";
   return "hoje";
 }
+
+/**
+ * Modelo configurável da mensagem de cobrança (página Config → "Mensagem de cobrança").
+ * Única fonte do texto quando o usuário define uma mensagem própria; tanto o fluxo
+ * manual (botão Cobrar) quanto uma futura automação devem gerar a mensagem a partir
+ * daqui (via gerarMensagem, em services/whatsapp.service.ts).
+ *
+ * Variáveis substituídas em tempo de geração (nenhum dado novo é persistido):
+ * {cliente} {produto} {parcela} {totalParcelas} {vencimento} {valor} {valorPago} {saldo}
+ * O bloco PIX é anexado automaticamente quando a cobrança usa PIX.
+ */
+export const MENSAGEM_COBRANCA_DEFAULT = `Olá, {cliente}. Sua parcela {parcela}/{totalParcelas} de {produto}, no valor de {valor}, vence em {vencimento}.`;

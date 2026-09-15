@@ -1,6 +1,6 @@
 // hooks/useParcelActions.ts — Ações de parcela com undo (M6b + correções M15)
 import { useCallback } from "react";
-import { Parcela as ParcelaAPI } from "../api/entities";
+import { Parcela as ParcelaAPI, Configuracao as ConfiguracaoAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
 import { hoje } from "../lib/date.utils";
 import { desfazerStatus } from "../domain/status.rules";
@@ -13,7 +13,7 @@ import type { EstadoAnterior } from "../types/common.types";
 export interface UseParcelActionsResult {
   marcarPago: (parcela: Parcela) => Promise<() => Promise<void>>;
   marcarParcial: (parcela: Parcela, valorRecebido: number) => Promise<void>;
-  cobrar: (parcela: Parcela, cobranca: Cobranca, cliente: Cliente) => string;
+  cobrar: (parcela: Parcela, cobranca: Cobranca, cliente: Cliente) => Promise<string>;
   confirmarEnvio: (parcelaId: string) => Promise<void>;
   arquivar: (parcelaId: string) => Promise<void>;
   desarquivar: (parcelaId: string) => Promise<void>;
@@ -68,8 +68,12 @@ export function useParcelActions(): UseParcelActionsResult {
     eventBus.emit("parcel:updated");
   }, []);
 
-  const cobrar = useCallback((parcela: Parcela, cobranca: Cobranca, cliente: Cliente): string => {
-    const mensagem = gerarMensagem(parcela, cobranca, cliente, hoje());
+  // Lê o modelo configurado (Config) e gera o link. A mesma gerarMensagem é a única
+  // forma de montar a mensagem — reutilizável por uma futura cobrança automática.
+  const cobrar = useCallback(async (parcela: Parcela, cobranca: Cobranca, cliente: Cliente): Promise<string> => {
+    const config = await ConfiguracaoAPI.list();
+    const mensagemCobranca = config[0]?.mensagemCobranca ?? null;
+    const mensagem = gerarMensagem(parcela, cobranca, cliente, hoje(), mensagemCobranca);
     return gerarLinkWhatsApp(cliente.telefone, mensagem);
   }, []);
 

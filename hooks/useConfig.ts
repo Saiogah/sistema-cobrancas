@@ -15,13 +15,15 @@ import { DIAS_TRABALHADOS_DEFAULT } from "../config/app.config";
 export interface ConfigData {
   id: string;
   diasTrabalhados: number[];
+  mensagemCobranca: string | null;
 }
 
 export interface UseConfigResult {
   config: ConfigData | null;
   loading: boolean;
   error: string | null;
-  salvar: (diasTrabalhados: number[]) => Promise<boolean>;
+  /** mensagemCobranca opcional: undefined = não alterar; "" = limpar (volta aos templates internos) */
+  salvar: (diasTrabalhados: number[], mensagemCobranca?: string) => Promise<boolean>;
 }
 
 /**
@@ -58,6 +60,7 @@ export function useConfig(): UseConfigResult {
         setConfig({
           id: record.id,
           diasTrabalhados: parseDiasTrabalhados(record.diasTrabalhados),
+          mensagemCobranca: record.mensagemCobranca ?? null,
         });
       } else {
         // Criar com defaults
@@ -68,6 +71,7 @@ export function useConfig(): UseConfigResult {
         setConfig({
           id: created.id,
           diasTrabalhados: parseDiasTrabalhados(created.diasTrabalhados),
+          mensagemCobranca: created.mensagemCobranca ?? null,
         });
       }
     } catch (e) {
@@ -82,18 +86,29 @@ export function useConfig(): UseConfigResult {
     fetchConfig();
   }, [fetchConfig]);
 
-  const salvar = useCallback(async (diasTrabalhados: number[]): Promise<boolean> => {
+  // mensagemCobranca opcional: undefined = não alterar; "" = limpar (volta aos templates internos)
+  const salvar = useCallback(async (diasTrabalhados: number[], mensagemCobranca?: string): Promise<boolean> => {
     if (!configIdRef.current) {
       setError("Configuração ainda não carregada");
       return false;
     }
     try {
       const serialized = serializeDiasTrabalhados(diasTrabalhados);
-      await ConfiguracaoAPI.update(configIdRef.current, { diasTrabalhados: serialized });
-      setConfig({
-        id: configIdRef.current,
+      const patch: { diasTrabalhados: string; mensagemCobranca?: string | null } = {
+        diasTrabalhados: serialized,
+      };
+      if (mensagemCobranca !== undefined) {
+        patch.mensagemCobranca = mensagemCobranca.trim() === "" ? null : mensagemCobranca;
+      }
+      await ConfiguracaoAPI.update(configIdRef.current, patch);
+      setConfig(prev => ({
+        id: configIdRef.current!,
         diasTrabalhados: [...diasTrabalhados].sort((a, b) => a - b),
-      });
+        mensagemCobranca:
+          mensagemCobranca !== undefined
+            ? (mensagemCobranca.trim() === "" ? null : mensagemCobranca)
+            : (prev?.mensagemCobranca ?? null),
+      }));
       return true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao salvar configuração";

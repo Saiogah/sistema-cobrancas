@@ -32,16 +32,20 @@ export interface BaseEntityApi<T, C, U> {
 export interface ConfiguracaoRecord {
   id: string;
   diasTrabalhados: string;
+  /** Modelo configurável da mensagem de cobrança. null = usar templates internos. */
+  mensagemCobranca?: string | null;
   created_date: string;
   updated_date: string;
 }
 
 export interface ConfiguracaoInput {
   diasTrabalhados: string | number[];
+  mensagemCobranca?: string | null;
 }
 
 export interface ConfiguracaoUpdate {
   diasTrabalhados?: string | number[];
+  mensagemCobranca?: string | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -610,6 +614,7 @@ export const Configuracao: BaseEntityApi<ConfiguracaoRecord, ConfiguracaoInput, 
   async create(data: ConfiguracaoInput): Promise<ConfiguracaoRecord> {
     return configBase.create({
       diasTrabalhados: formatDiasTrabalhados(data.diasTrabalhados),
+      mensagemCobranca: data.mensagemCobranca ?? null,
     });
   },
 
@@ -617,6 +622,9 @@ export const Configuracao: BaseEntityApi<ConfiguracaoRecord, ConfiguracaoInput, 
     const patch: ConfiguracaoUpdate = {};
     if (data.diasTrabalhados !== undefined) {
       patch.diasTrabalhados = formatDiasTrabalhados(data.diasTrabalhados);
+    }
+    if (data.mensagemCobranca !== undefined) {
+      patch.mensagemCobranca = data.mensagemCobranca;
     }
     return configBase.update(id, patch);
   },

@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useConfig } from "../hooks/useConfig";
 import { DIAS_SEMANA } from "../config/app.config";
+import { MENSAGEM_COBRANCA_DEFAULT } from "../config/messages.config";
 import { exportarDados, importarDados, limparDados } from "../lib/backup";
 
 export function SettingsPage() {
   const { config, loading, error, salvar } = useConfig();
   const [diasSelecionados, setDiasSelecionados] = useState<number[]>([]);
+  const [mensagemCobranca, setMensagemCobranca] = useState("");
   const [salvando, setSalvando] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -22,6 +24,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (config) {
       setDiasSelecionados(config.diasTrabalhados);
+      setMensagemCobranca(config.mensagemCobranca ?? MENSAGEM_COBRANCA_DEFAULT);
     }
   }, [config]);
 
@@ -35,7 +38,12 @@ export function SettingsPage() {
 
   const handleSalvar = async () => {
     setSalvando(true);
-    const ok = await salvar(diasSelecionados);
+    // Se a mensagem não foi alterada, não grava o campo (mantém o padrão interno).
+    const mensagemParaSalvar =
+      mensagemCobranca === (config?.mensagemCobranca ?? MENSAGEM_COBRANCA_DEFAULT)
+        ? undefined
+        : mensagemCobranca;
+    const ok = await salvar(diasSelecionados, mensagemParaSalvar);
     setSalvando(false);
     if (ok) {
       setToastMsg("Configuração salva com sucesso!");
@@ -146,6 +154,29 @@ export function SettingsPage() {
       <p className="text-xs text-muted-foreground leading-relaxed">
         Referência para seus dias de trabalho. O cálculo de atraso considera apenas a data de vencimento.
       </p>
+
+      {/* Mensagem de cobrança */}
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-foreground">Mensagem de cobrança</h2>
+          <p className="text-xs text-muted-foreground">
+            Texto usado pelo botão Cobrar. Deixe em branco para voltar ao padrão do sistema.
+          </p>
+        </div>
+        <textarea
+          value={mensagemCobranca}
+          onChange={(e) => setMensagemCobranca(e.target.value)}
+          rows={4}
+          className="w-full rounded-md border border-input bg-card p-3 text-sm"
+          placeholder="Olá, {cliente}. Sua parcela {parcela}/{totalParcelas} de {produto}..."
+        />
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Variáveis: {"{cliente}"} · {"{produto}"} · {"{parcela}"} · {"{totalParcelas}"} · {"{vencimento}"} · {"{valor}"} · {"{valorPago}"} · {"{saldo}"}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Cobranças com PIX recebem a chave automaticamente no fim da mensagem.
+        </p>
+      </div>
 
       {/* Botão Salvar */}
       <button
