@@ -8,7 +8,7 @@ import { useParcelActions } from "../hooks/useParcelActions";
 import { eventBus } from "../lib/event-bus";
 import { formatarTelefone, formatarMoeda } from "../lib/format.utils";
 import { normalizarTelefone, validarTelefone } from "../lib/validation.utils";
-import { formatarDataCurta } from "../lib/date.utils";
+import { formatarDataCurta, hoje } from "../lib/date.utils";
 import { podeEditarCobranca, podeExcluirCobranca } from "../domain/charge.rules";
 import { SearchInput } from "../components/SearchInput";
 import { EmptyState } from "../components/EmptyState";
@@ -157,6 +157,19 @@ function ClientCard(props: ClientCardProps) {
     }
   }, [parcelActions, patchParcelaLocal, refreshCharges]);
 
+  const marcarPagoOptimista = useCallback(async (par: Parcela) => {
+    // Pagamento antecipado: marca somente esta parcela (total), reutilizando marcarPago.
+    const anterior = { status: par.status, valorPago: par.valorPago, dataPagamento: par.dataPagamento };
+    patchParcelaLocal(par.id, { status: "pago", valorPago: par.valor, dataPagamento: hoje() });
+    try {
+      await parcelActions.marcarPago(par);
+      await refreshCharges();
+    } catch {
+      patchParcelaLocal(par.id, anterior as any);
+      setActionError({ message: "Erro ao marcar como pago. Tente novamente.", retry: () => void marcarPagoOptimista(par) });
+    }
+  }, [parcelActions, patchParcelaLocal, refreshCharges]);
+
   const desfazerPagamentoOptimista = useCallback(async (par: Parcela) => {
     // MÉD-01 fix (PRD §10.6): desfazer manual exige confirmação
     const confirmado = window.confirm('Desfazer o pagamento desta parcela e voltar ao status anterior?');
@@ -242,6 +255,11 @@ function ClientCard(props: ClientCardProps) {
                         React.createElement("span", null, `${par.numeroParcela}. ${formatarMoeda(par.valor)} · ${formatarDataCurta(par.dataVencimento)}`),
                         React.createElement("div", { className: "flex items-center gap-1" },
                           React.createElement(StatusBadge, { status: par.status }),
+                          par.status !== "pago" && !par.arquivada ? React.createElement("button", {
+                            onClick: (e: any) => { e.stopPropagation(); void marcarPagoOptimista(par); },
+                            className: "rounded border px-1.5 py-0.5 text-xs",
+                            title: "Marcar como pago (inclui pagamento antecipado)",
+                          }, "Marcar pago") : null,
                           par.arquivada ? React.createElement("button", {
                             onClick: (e: any) => { e.stopPropagation(); void desarquivarOptimista(par); },
                             className: "rounded border px-1.5 py-0.5 text-xs",

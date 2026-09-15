@@ -14,6 +14,8 @@ export interface ProximoVencimento {
   data: string;
   total: number;
   valor: number;
+  /** Parcelas reais daquele vencimento — para exibir cliente/produto/valor no Dashboard. */
+  parcelas: Parcela[];
 }
 export interface Contadores {
   total: number;
@@ -82,7 +84,7 @@ export function useDashboard(): UseDashboardResult {
         const parcelasDoDia = parcelasFiltradas.filter((p) => p.dataVencimento === data);
         const dia = parseInt(data.split("-")[2], 10);
         const valor = parcelasDoDia.reduce((sum, p) => sum + p.valor, 0);
-        proximos.push({ dia, data, total: parcelasDoDia.length, valor });
+        proximos.push({ dia, data, total: parcelasDoDia.length, valor, parcelas: parcelasDoDia });
         if (proximos.length >= 3) break;
       }
 

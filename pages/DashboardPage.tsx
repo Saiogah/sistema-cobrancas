@@ -70,7 +70,12 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     async function fetchDados() {
-      const todasParcelas = [...parcelasAtrasadas, ...parcelasHoje];
+      // Inclui também as parcelas dos próximos vencimentos para exibir cliente/produto na tela inicial.
+      const todasParcelas = [
+        ...parcelasAtrasadas,
+        ...parcelasHoje,
+        ...proximosVencimentos.flatMap(v => v.parcelas),
+      ];
       const cobrancaIds = [...new Set(todasParcelas.map(p => p.cobrancaId))];
       const clienteIds = [...new Set(todasParcelas.map(p => p.clienteId))];
       if (cobrancaIds.length === 0 && clienteIds.length === 0) {
@@ -92,7 +97,7 @@ export function DashboardPage() {
     }
     void fetchDados();
     return () => { cancelled = true; };
-  }, [parcelasHoje, parcelasAtrasadas]);
+  }, [parcelasHoje, parcelasAtrasadas, proximosVencimentos]);
 
   const allItems: DashboardItem[] = useMemo(() => {
     const base = [...parcelasAtrasadas, ...parcelasHoje];
@@ -304,55 +309,43 @@ export function DashboardPage() {
     });
   }, [overlayVencimento, handleVencimentoClick]);
 
+  // Wrapper comum das ações do overlay: executa, atualiza Dashboard + overlay e
+  // mostra toast de erro com retry. A lógica real vem de useParcelActions (sem duplicação).
+  const acaoOverlay = useCallback(async (acao: () => Promise<unknown>, mensagemErro: string, retry: () => void) => {
+    try {
+      await acao();
+      await refresh();
+      await refreshOverlay();
+    } catch {
+      showError(mensagemErro, retry);
+    }
+  }, [refresh, refreshOverlay, showError]);
+
+  const parcelaOverlay = useCallback((parcelaId: string) =>
+    overlayVencimento?.parcelas.find(i => i.parcela.id === parcelaId)?.parcela, [overlayVencimento]);
+
   const handleOverlayCharge = useCallback((parcela: Parcela) => {
     const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcela.id);
-    if (!item?.cobranca || !item?.cliente) return;
-    window.open(cobrar(item.parcela, item.cobranca, item.cliente), "_blank");
+    if (item?.cobranca && item?.cliente) window.open(cobrar(item.parcela, item.cobranca, item.cliente), "_blank");
   }, [overlayVencimento, cobrar]);
 
-  const handleOverlayConfirmSend = useCallback(async (parcelaId: string) => {
-    try {
-      await confirmarEnvio(parcelaId);
-      await refresh();
-      await refreshOverlay();
-    } catch {
-      showError("Erro ao registrar cobrança enviada.", () => void handleOverlayConfirmSend(parcelaId));
-    }
-  }, [confirmarEnvio, refresh, refreshOverlay, showError]);
+  const handleOverlayConfirmSend = useCallback((parcelaId: string) =>
+    void acaoOverlay(() => confirmarEnvio(parcelaId), "Erro ao registrar cobrança enviada.", () => handleOverlayConfirmSend(parcelaId)),
+  [acaoOverlay, confirmarEnvio]);
 
-  const handleOverlayMarkPaid = useCallback(async (parcelaId: string) => {
-    const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcelaId);
-    if (!item) return;
-    try {
-      await marcarPago(item.parcela);
-      await refresh();
-      await refreshOverlay();
-    } catch {
-      showError("Erro ao marcar como pago.", () => void handleOverlayMarkPaid(parcelaId));
-    }
-  }, [overlayVencimento, marcarPago, refresh, refreshOverlay, showError]);
+  const handleOverlayMarkPaid = useCallback((parcelaId: string) => {
+    const parcela = parcelaOverlay(parcelaId);
+    if (parcela) void acaoOverlay(() => marcarPago(parcela), "Erro ao marcar como pago.", () => handleOverlayMarkPaid(parcelaId));
+  }, [acaoOverlay, marcarPago, parcelaOverlay]);
 
-  const handleOverlayMarkPartial = useCallback(async (parcelaId: string, valorRecebido: number) => {
-    const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcelaId);
-    if (!item) return;
-    try {
-      await marcarParcial(item.parcela, valorRecebido);
-      await refresh();
-      await refreshOverlay();
-    } catch {
-      showError("Erro ao registrar pagamento parcial.", () => void handleOverlayMarkPartial(parcelaId, valorRecebido));
-    }
-  }, [overlayVencimento, marcarParcial, refresh, refreshOverlay, showError]);
+  const handleOverlayMarkPartial = useCallback((parcelaId: string, valorRecebido: number) => {
+    const parcela = parcelaOverlay(parcelaId);
+    if (parcela) void acaoOverlay(() => marcarParcial(parcela, valorRecebido), "Erro ao registrar pagamento parcial.", () => handleOverlayMarkPartial(parcelaId, valorRecebido));
+  }, [acaoOverlay, marcarParcial, parcelaOverlay]);
 
-  const handleOverlayArchive = useCallback(async (parcelaId: string) => {
-    try {
-      await arquivar(parcelaId);
-      await refresh();
-      await refreshOverlay();
-    } catch {
-      showError("Erro ao arquivar.", () => void handleOverlayArchive(parcelaId));
-    }
-  }, [arquivar, refresh, refreshOverlay, showError]);
+  const handleOverlayArchive = useCallback((parcelaId: string) =>
+    void acaoOverlay(() => arquivar(parcelaId), "Erro ao arquivar.", () => handleOverlayArchive(parcelaId)),
+  [acaoOverlay, arquivar]);
 
   const dismissUndo = useCallback(() => setUndoToast(null), []);
   const dismissError = useCallback(() => setErrorToast(null), []);
@@ -371,7 +364,7 @@ export function DashboardPage() {
     const proximo = proximosVencimentos[0];
     return React.createElement("div", { className: "flex flex-col gap-4 p-4 max-w-2xl mx-auto" },
       React.createElement(EmptyState, { title: "Nada para cobrar hoje", description: `✓ Próximo vencimento: dia ${proximo.dia}` }),
-      ...proximosVencimentos.map((v, i) => renderProximoVencimento(v, i, handleVencimentoClick)),
+      ...proximosVencimentos.map((v, i) => renderProximoVencimento(v, i, handleVencimentoClick, dadosClientes, dadosCobrancas)),
       errorToast ? React.createElement(ActionToast, { message: errorToast.message, onRetry: errorToast.retry, onDismiss: dismissError }) : null,
     );
   }
@@ -403,7 +396,7 @@ export function DashboardPage() {
         })),
     proximosVencimentos.length > 0 ? React.createElement("div", { className: "mt-4 pt-3 border-t" },
       React.createElement("h2", { className: "text-sm font-medium text-muted-foreground mb-2" }, "Próximos vencimentos"),
-      ...proximosVencimentos.map((v, i) => renderProximoVencimento(v, i, handleVencimentoClick)),
+      ...proximosVencimentos.map((v, i) => renderProximoVencimento(v, i, handleVencimentoClick, dadosClientes, dadosCobrancas)),
     ) : null,
     batch.temSelecao ? React.createElement(BatchBar, { quantidade: batch.quantidade, onMarcarTodasPagas: handleMarcarLote, onLimpar: batch.limpar }) : null,
     undoToast ? React.createElement(UndoToast, { message: undoToast.message, onUndo: () => { undoToast.onUndo(); dismissUndo(); }, onDismiss: dismissUndo }) : null,
@@ -418,16 +411,32 @@ export function DashboardPage() {
   );
 }
 
-function renderProximoVencimento(venc: { dia: number; data: string; total: number; valor: number }, index: number, onClick: (v: typeof venc) => void) {
-  return React.createElement("div", { key: index, className: "flex items-center justify-between py-2 px-3 rounded-lg border bg-card cursor-pointer hover:bg-accent", onClick: () => onClick(venc) },
-    React.createElement("div", { className: "flex items-center gap-2" },
-      React.createElement("span", { className: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium" }, String(venc.dia).padStart(2, "0")),
-      React.createElement("div", { className: "flex flex-col" },
-        React.createElement("span", { className: "text-sm font-medium" }, `${venc.total} cobrança${venc.total > 1 ? "s" : ""}`),
-        React.createElement("span", { className: "text-xs text-muted-foreground" }, formatarDataBR(venc.data)),
+function renderProximoVencimento(
+  venc: { dia: number; data: string; total: number; valor: number; parcelas: Parcela[] },
+  index: number,
+  onClick: (v: typeof venc) => void,
+  clientes: Record<string, Cliente>,
+  cobrancas: Record<string, Cobranca>,
+) {
+  return React.createElement("div", { key: index, className: "py-2 px-3 rounded-lg border bg-card cursor-pointer hover:bg-accent", onClick: () => onClick(venc) },
+    React.createElement("div", { className: "flex items-center justify-between" },
+      React.createElement("div", { className: "flex items-center gap-2" },
+        React.createElement("span", { className: "w-8 h-8 rounded-full bg-muted flex items-center justify-center text-sm font-medium" }, String(venc.dia).padStart(2, "0")),
+        React.createElement("div", { className: "flex flex-col" },
+          React.createElement("span", { className: "text-sm font-medium" }, `${venc.total} cobrança${venc.total > 1 ? "s" : ""}`),
+          React.createElement("span", { className: "text-xs text-muted-foreground" }, formatarDataBR(venc.data)),
+        ),
+      ),
+      React.createElement("span", { className: "text-sm font-medium" }, formatarMoeda(venc.valor)),
+    ),
+    // Uma linha por parcela: cliente — produto · valor (identifica de quem é cada cobrança)
+    ...venc.parcelas.map(p =>
+      React.createElement("div", { key: p.id, className: "flex items-center justify-between gap-2 pl-10 mt-1 text-xs" },
+        React.createElement("span", { className: "truncate text-muted-foreground" },
+          `${clientes[p.clienteId]?.nome || "Cliente"} — ${cobrancas[p.cobrancaId]?.nomeProdutoServico || "Produto"}`),
+        React.createElement("span", { className: "flex-shrink-0 font-medium" }, formatarMoeda(p.valor)),
       ),
     ),
-    React.createElement("span", { className: "text-sm font-medium" }, formatarMoeda(venc.valor)),
   );
 }
 
