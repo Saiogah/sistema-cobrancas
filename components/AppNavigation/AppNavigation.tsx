@@ -15,18 +15,21 @@ export interface AppNavigationProps { onLogout?: () => void; }
 function AppNavigationBase({ onLogout }: AppNavigationProps) {
   return React.createElement('nav', {
     'aria-label': 'Navegação principal',
-    className: 'fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur md:sticky md:top-0 md:bottom-auto md:border-t-0 md:border-b',
+    className: 'fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 backdrop-blur-xl shadow-[0_-10px_28px_-24px_rgba(15,23,42,.45)] md:sticky md:top-0 md:bottom-auto md:border-t-0 md:border-b md:shadow-[0_10px_28px_-26px_rgba(15,23,42,.45)]',
   },
-    React.createElement('div', { className: 'mx-auto flex max-w-3xl items-stretch' },
+    React.createElement('div', { className: 'mx-auto flex max-w-5xl items-stretch px-2 md:px-4' },
       React.createElement('div', { className: 'grid flex-1 grid-cols-6' },
         ...ITEMS.map(item => React.createElement(NavLink, {
           key: item.to, to: item.to, end: item.end,
           className: ({ isActive }: { isActive: boolean }) => [
-            'flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs font-medium transition-colors md:min-h-14 md:flex-row md:gap-2 md:px-3',
-            isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground',
+            'relative flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs font-medium transition-all md:min-h-16 md:flex-row md:gap-2 md:px-4',
+            'after:absolute after:bottom-0 after:left-1/2 after:h-0.5 after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-primary after:transition-all',
+            isActive
+              ? 'text-primary after:w-8 md:after:w-10'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
           ].join(' '),
         },
-          React.createElement('span', { 'aria-hidden': true, className: 'text-lg leading-none' }, item.icon),
+          React.createElement('span', { 'aria-hidden': true, className: 'text-lg leading-none drop-shadow-sm' }, item.icon),
           React.createElement('span', null, item.label),
         )),
       ),
