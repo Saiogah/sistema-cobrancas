@@ -20,8 +20,6 @@ function ChargeCardBase(props: ChargeCardProps) {
   const { parcela, cobranca, cliente } = props;
   const [expandido, setExpandido] = useState(false);
   const [menuPago, setMenuPago] = useState(false);
-  const [parcialAtivo, setParcialAtivo] = useState(false);
-  const [valorParcial, setValorParcial] = useState("");
   // CR-03 fix: rastreia se o WhatsApp foi aberto para mostrar "Confirmar envio"
   const [cobrancaAberta, setCobrancaAberta] = useState(false);
   const dataHoje = hoje();
@@ -33,10 +31,6 @@ function ChargeCardBase(props: ChargeCardProps) {
   const mostrarAtraso = atrasada && parcela.status !== "cobrado";
 
   const handleMarcarTotal = useCallback(() => { setMenuPago(false); props.onMarkPaid?.(parcela.id); }, [parcela.id, props]);
-  const handleMarcarParcial = useCallback(() => {
-    const v = parseFloat(valorParcial.replace(",", "."));
-    if (!isNaN(v) && v > 0) { setMenuPago(false); setParcialAtivo(false); setValorParcial(""); props.onMarkPartial?.(parcela.id, v); }
-  }, [valorParcial, props]);
 
   const handleCobrar = useCallback((e: any) => {
     e.stopPropagation();
@@ -96,25 +90,18 @@ function ChargeCardBase(props: ChargeCardProps) {
         onClick: handleCobrar,
         className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent"
       }, "💬 Cobrar saldo") : null,
-      !menuPago ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setParcialAtivo(false); setMenuPago(true); }, className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent" }, "Marcar pago")
+      !menuPago ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setMenuPago(true); }, className: "rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent" }, "Marcar pago")
         : React.createElement("div", { className: "flex flex-col gap-2 w-full mt-1 p-2 rounded-md border" },
-            // Identificação da parcela visível junto às ações (antes de confirmar o pagamento)
+            // Identificação da parcela visível antes de confirmar o pagamento
             React.createElement("div", { className: "text-xs text-muted-foreground" },
               `Parcela ${parcela.numeroParcela} de ${cobranca?.quantidadeParcelas || 1} · Vencimento: ${formatarDataCurta(parcela.dataVencimento)} · Valor: ${formatarMoeda(parcela.valor)}`),
             isPP ? React.createElement("div", { className: "text-xs text-muted-foreground" },
               `Já pago: ${formatarMoeda(parcela.valorPago || 0)} · Saldo restante: ${formatarMoeda(parcela.valor - (parcela.valorPago || 0))}`) : null,
-            // Etapa 2: fluxos separados — total não tem campo de valor; parcial abre o campo só quando selecionada
-            !parcialAtivo
-              ? React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
-                  React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarTotal(); }, className: "rounded-md bg-emerald-100 text-emerald-700 px-2.5 py-1 text-xs font-medium" }, "Pagamento total"),
-                  React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setParcialAtivo(true); }, className: "rounded-md bg-blue-100 text-blue-700 px-2.5 py-1 text-xs font-medium" }, "Pagamento parcial"),
-                  React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setMenuPago(false); }, className: "text-xs text-muted-foreground px-1" }, "✕"),
-                )
-              : React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
-                  React.createElement("input", { type: "text", value: valorParcial, onChange: (e: any) => setValorParcial(e.target.value), placeholder: "0,00", autoFocus: true, className: "w-20 rounded-md border px-2 py-1 text-xs", onClick: (e: any) => e.stopPropagation() }),
-                  React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarParcial(); }, className: "rounded-md bg-blue-100 text-blue-700 px-2 py-1 text-xs font-medium" }, "Confirmar parcial"),
-                  React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setParcialAtivo(false); }, className: "text-xs text-muted-foreground px-1" }, "Voltar"),
-                ),
+            // Pagamento parcial não é exposto aqui: nesta interface marca-se apenas o pagamento total (marcarPago).
+            React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
+              React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarTotal(); }, className: "rounded-md bg-emerald-100 text-emerald-700 px-2.5 py-1 text-xs font-medium" }, "Marcar parcela como paga"),
+              React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setMenuPago(false); }, className: "text-xs text-muted-foreground px-1" }, "✕"),
+            ),
           ),
       expandido ? React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); props.onArchive?.(parcela.id); }, className: "rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent" }, "Arquivar") : null,
     ) : null,

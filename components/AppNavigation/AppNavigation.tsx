@@ -6,6 +6,7 @@ const ITEMS = [
   { to: '/nova', icon: '➕', label: 'Nova', end: false },
   { to: '/clientes', icon: '👥', label: 'Clientes', end: false },
   { to: '/produtos', icon: '📦', label: 'Produtos', end: false },
+  { to: '/cobrancas', icon: '💰', label: 'Cobranças', end: false },
   { to: '/config', icon: '⚙️', label: 'Config', end: false },
 ] as const;
 
@@ -17,7 +18,7 @@ function AppNavigationBase({ onLogout }: AppNavigationProps) {
     className: 'fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur md:sticky md:top-0 md:bottom-auto md:border-t-0 md:border-b',
   },
     React.createElement('div', { className: 'mx-auto flex max-w-3xl items-stretch' },
-      React.createElement('div', { className: 'grid flex-1 grid-cols-5' },
+      React.createElement('div', { className: 'grid flex-1 grid-cols-6' },
         ...ITEMS.map(item => React.createElement(NavLink, {
           key: item.to, to: item.to, end: item.end,
           className: ({ isActive }: { isActive: boolean }) => [

@@ -12,6 +12,7 @@ import { NewChargePage } from './pages/NewChargePage';
 import type { NewChargePageProps } from './pages/NewChargePage';
 import { ClientsPage } from './pages/ClientsPage';
 import { ProductsPage } from './pages/ProductsPage';
+import { CobrancasPage } from './pages/CobrancasPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppNavigation } from './components/AppNavigation';
 import { OnboardingGuide } from './components/OnboardingGuide';
@@ -67,6 +68,7 @@ function AppRoutes({ counts, onboardingAtivo }: { counts: OnboardingCounts | nul
     React.createElement(Route, { path: '/nova', element: React.createElement(NewChargeRoute) }),
     React.createElement(Route, { path: '/clientes', element: React.createElement(ClientsPage) }),
     React.createElement(Route, { path: '/produtos', element: React.createElement(ProductsPage) }),
+    React.createElement(Route, { path: '/cobrancas', element: React.createElement(CobrancasPage) }),
     React.createElement(Route, { path: '/config', element: React.createElement(SettingsPage) }),
     React.createElement(Route, { path: '*', element: React.createElement(Navigate, { to: '/', replace: true }) }),
   );
