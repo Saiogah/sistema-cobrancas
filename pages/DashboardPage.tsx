@@ -350,6 +350,15 @@ export function DashboardPage() {
   const dismissUndo = useCallback(() => setUndoToast(null), []);
   const dismissError = useCallback(() => setErrorToast(null), []);
 
+  // Handlers do overlay compartilhados pelas branches (b) e (c) do Dashboard.
+  const overlayHandlers = {
+    onCharge: handleOverlayCharge,
+    onConfirmSend: handleOverlayConfirmSend,
+    onMarkPaid: handleOverlayMarkPaid,
+    onMarkPartial: handleOverlayMarkPartial,
+    onArchive: handleOverlayArchive,
+  };
+
   if (loading) return React.createElement("div", { className: "flex justify-center py-12" }, React.createElement("p", { className: "text-muted-foreground" }, "Carregando..."));
   if (error) return React.createElement("div", { className: "flex justify-center py-12" }, React.createElement("p", { className: "text-destructive" }, `Erro: ${error}`));
 
@@ -366,6 +375,7 @@ export function DashboardPage() {
       React.createElement(EmptyState, { title: "Nada para cobrar hoje", description: `✓ Próximo vencimento: dia ${proximo.dia}` }),
       ...proximosVencimentos.map((v, i) => renderProximoVencimento(v, i, handleVencimentoClick, dadosClientes, dadosCobrancas)),
       errorToast ? React.createElement(ActionToast, { message: errorToast.message, onRetry: errorToast.retry, onDismiss: dismissError }) : null,
+      overlayVencimento ? renderOverlayVencimento(overlayVencimento, () => setOverlayVencimento(null), overlayHandlers) : null,
     );
   }
 
@@ -401,13 +411,7 @@ export function DashboardPage() {
     batch.temSelecao ? React.createElement(BatchBar, { quantidade: batch.quantidade, onMarcarTodasPagas: handleMarcarLote, onLimpar: batch.limpar }) : null,
     undoToast ? React.createElement(UndoToast, { message: undoToast.message, onUndo: () => { undoToast.onUndo(); dismissUndo(); }, onDismiss: dismissUndo }) : null,
     errorToast ? React.createElement(ActionToast, { message: errorToast.message, onRetry: () => { const retry = errorToast.retry; dismissError(); retry(); }, onDismiss: dismissError }) : null,
-    overlayVencimento ? renderOverlayVencimento(overlayVencimento, () => setOverlayVencimento(null), {
-      onCharge: handleOverlayCharge,
-      onConfirmSend: handleOverlayConfirmSend,
-      onMarkPaid: handleOverlayMarkPaid,
-      onMarkPartial: handleOverlayMarkPartial,
-      onArchive: handleOverlayArchive,
-    }) : null,
+    overlayVencimento ? renderOverlayVencimento(overlayVencimento, () => setOverlayVencimento(null), overlayHandlers) : null,
   );
 }
 
