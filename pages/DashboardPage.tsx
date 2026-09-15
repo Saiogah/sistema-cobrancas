@@ -292,6 +292,68 @@ export function DashboardPage() {
     }
   }, [showError]);
 
+  // Re-executa a mesma busca do overlay para refletir o estado atual após uma ação
+  // (ex.: parcela paga desaparece da lista, igual ao comportamento do Dashboard principal).
+  const refreshOverlay = useCallback(async () => {
+    if (!overlayVencimento) return;
+    await handleVencimentoClick({
+      dia: overlayVencimento.dia,
+      data: overlayVencimento.data,
+      total: overlayVencimento.total,
+      valor: overlayVencimento.valor,
+    });
+  }, [overlayVencimento, handleVencimentoClick]);
+
+  const handleOverlayCharge = useCallback((parcela: Parcela) => {
+    const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcela.id);
+    if (!item?.cobranca || !item?.cliente) return;
+    window.open(cobrar(item.parcela, item.cobranca, item.cliente), "_blank");
+  }, [overlayVencimento, cobrar]);
+
+  const handleOverlayConfirmSend = useCallback(async (parcelaId: string) => {
+    try {
+      await confirmarEnvio(parcelaId);
+      await refresh();
+      await refreshOverlay();
+    } catch {
+      showError("Erro ao registrar cobrança enviada.", () => void handleOverlayConfirmSend(parcelaId));
+    }
+  }, [confirmarEnvio, refresh, refreshOverlay, showError]);
+
+  const handleOverlayMarkPaid = useCallback(async (parcelaId: string) => {
+    const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcelaId);
+    if (!item) return;
+    try {
+      await marcarPago(item.parcela);
+      await refresh();
+      await refreshOverlay();
+    } catch {
+      showError("Erro ao marcar como pago.", () => void handleOverlayMarkPaid(parcelaId));
+    }
+  }, [overlayVencimento, marcarPago, refresh, refreshOverlay, showError]);
+
+  const handleOverlayMarkPartial = useCallback(async (parcelaId: string, valorRecebido: number) => {
+    const item = overlayVencimento?.parcelas.find(i => i.parcela.id === parcelaId);
+    if (!item) return;
+    try {
+      await marcarParcial(item.parcela, valorRecebido);
+      await refresh();
+      await refreshOverlay();
+    } catch {
+      showError("Erro ao registrar pagamento parcial.", () => void handleOverlayMarkPartial(parcelaId, valorRecebido));
+    }
+  }, [overlayVencimento, marcarParcial, refresh, refreshOverlay, showError]);
+
+  const handleOverlayArchive = useCallback(async (parcelaId: string) => {
+    try {
+      await arquivar(parcelaId);
+      await refresh();
+      await refreshOverlay();
+    } catch {
+      showError("Erro ao arquivar.", () => void handleOverlayArchive(parcelaId));
+    }
+  }, [arquivar, refresh, refreshOverlay, showError]);
+
   const dismissUndo = useCallback(() => setUndoToast(null), []);
   const dismissError = useCallback(() => setErrorToast(null), []);
 
@@ -346,7 +408,13 @@ export function DashboardPage() {
     batch.temSelecao ? React.createElement(BatchBar, { quantidade: batch.quantidade, onMarcarTodasPagas: handleMarcarLote, onLimpar: batch.limpar }) : null,
     undoToast ? React.createElement(UndoToast, { message: undoToast.message, onUndo: () => { undoToast.onUndo(); dismissUndo(); }, onDismiss: dismissUndo }) : null,
     errorToast ? React.createElement(ActionToast, { message: errorToast.message, onRetry: () => { const retry = errorToast.retry; dismissError(); retry(); }, onDismiss: dismissError }) : null,
-    overlayVencimento ? renderOverlayVencimento(overlayVencimento, () => setOverlayVencimento(null)) : null,
+    overlayVencimento ? renderOverlayVencimento(overlayVencimento, () => setOverlayVencimento(null), {
+      onCharge: handleOverlayCharge,
+      onConfirmSend: handleOverlayConfirmSend,
+      onMarkPaid: handleOverlayMarkPaid,
+      onMarkPartial: handleOverlayMarkPartial,
+      onArchive: handleOverlayArchive,
+    }) : null,
   );
 }
 
@@ -363,7 +431,19 @@ function renderProximoVencimento(venc: { dia: number; data: string; total: numbe
   );
 }
 
-function renderOverlayVencimento(venc: { dia: number; data: string; total: number; valor: number; parcelas: DashboardItem[] }, onClose: () => void) {
+interface OverlayHandlers {
+  onCharge: (p: Parcela) => void;
+  onConfirmSend: (id: string) => void;
+  onMarkPaid: (id: string) => void;
+  onMarkPartial: (id: string, v: number) => void;
+  onArchive: (id: string) => void;
+}
+
+function renderOverlayVencimento(
+  venc: { dia: number; data: string; total: number; valor: number; parcelas: DashboardItem[] },
+  onClose: () => void,
+  handlers: OverlayHandlers,
+) {
   return React.createElement("div", { className: "fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center", onClick: onClose },
     React.createElement("div", { className: "bg-card text-card-foreground rounded-t-lg sm:rounded-lg w-full max-w-2xl max-h-[80vh] overflow-y-auto", onClick: (e: any) => e.stopPropagation() },
       React.createElement("div", { className: "flex items-center justify-between p-4 border-b" },
@@ -376,7 +456,17 @@ function renderOverlayVencimento(venc: { dia: number; data: string; total: numbe
       React.createElement("div", { className: "flex flex-col gap-2 p-4" },
         venc.parcelas.length === 0
           ? React.createElement("p", { className: "text-sm text-muted-foreground text-center py-4" }, "Nenhuma parcela encontrada")
-          : venc.parcelas.map(item => React.createElement(ChargeCard, { key: item.parcela.id, parcela: item.parcela, cobranca: item.cobranca, cliente: item.cliente })),
+          : venc.parcelas.map(item => React.createElement(ChargeCard, {
+              key: item.parcela.id,
+              parcela: item.parcela,
+              cobranca: item.cobranca,
+              cliente: item.cliente,
+              onCharge: handlers.onCharge,
+              onConfirmSend: handlers.onConfirmSend,
+              onMarkPaid: handlers.onMarkPaid,
+              onMarkPartial: handlers.onMarkPartial,
+              onArchive: handlers.onArchive,
+            })),
       ),
     ),
   );
