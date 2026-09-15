@@ -2,12 +2,20 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useConfig } from "../hooks/useConfig";
+import { useTheme, type ThemePreference } from "../hooks/useTheme";
 import { DIAS_SEMANA } from "../config/app.config";
 import { MENSAGEM_COBRANCA_DEFAULT } from "../config/messages.config";
 import { exportarDados, importarDados, limparDados } from "../lib/backup";
 
+const THEME_OPTIONS: Array<{ value: ThemePreference; icon: string; label: string; hint: string }> = [
+  { value: "light", icon: "☀️", label: "Claro", hint: "Usar tema claro" },
+  { value: "dark", icon: "🌙", label: "Escuro", hint: "Usar tema escuro" },
+  { value: "system", icon: "🖥️", label: "Sistema", hint: "Seguir o dispositivo" },
+];
+
 export function SettingsPage() {
   const { config, loading, error, salvar } = useConfig();
+  const { theme, setTheme } = useTheme();
   const [diasSelecionados, setDiasSelecionados] = useState<number[]>([]);
   const [mensagemCobranca, setMensagemCobranca] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -20,7 +28,6 @@ export function SettingsPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Carregar config inicial
   useEffect(() => {
     if (config) {
       setDiasSelecionados(config.diasTrabalhados);
@@ -38,7 +45,6 @@ export function SettingsPage() {
 
   const handleSalvar = async () => {
     setSalvando(true);
-    // Se a mensagem não foi alterada, não grava o campo (mantém o padrão interno).
     const mensagemParaSalvar =
       mensagemCobranca === (config?.mensagemCobranca ?? MENSAGEM_COBRANCA_DEFAULT)
         ? undefined
@@ -80,15 +86,11 @@ export function SettingsPage() {
       setBackupError(err?.message || "Erro ao importar backup.");
     } finally {
       setImportando(false);
-      if (e.target) {
-        e.target.value = "";
-      }
+      if (e.target) e.target.value = "";
     }
   };
 
-  const handleTriggerImport = () => {
-    fileInputRef.current?.click();
-  };
+  const handleTriggerImport = () => fileInputRef.current?.click();
 
   const handleLimparDados = async () => {
     const confirmacao = window.confirm(
@@ -118,48 +120,79 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="max-w-md mx-auto p-6 space-y-6">
+    <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-6">
       <div className="space-y-1">
+        <p className="section-kicker">Preferências</p>
         <h1 className="text-2xl font-semibold text-foreground">Configurações</h1>
-        <p className="text-sm text-muted-foreground">Dias que você trabalha</p>
+        <p className="text-sm text-muted-foreground">Personalize a aparência e o funcionamento do sistema.</p>
       </div>
 
       {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
       )}
 
-      {/* Checkboxes Seg-Dom */}
-      <div className="space-y-2">
-        {DIAS_SEMANA.map((dia: { valor: number; label: string }) => (
-          <label
-            key={dia.valor}
-            className="flex items-center gap-3 rounded-lg border bg-card p-3 cursor-pointer hover:bg-accent transition-colors"
-          >
-            <input
-              type="checkbox"
-              checked={diasSelecionados.includes(dia.valor)}
-              onChange={() => toggleDia(dia.valor)}
-              className="h-4 w-4 rounded border-input accent-primary"
-            />
-            <span className="text-sm font-medium text-card-foreground">
-              {dia.label}
-            </span>
-          </label>
-        ))}
-      </div>
+      <section className="surface-card p-4 sm:p-5 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Aparência</h2>
+          <p className="text-sm text-muted-foreground">Escolha como o sistema deve aparecer.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {THEME_OPTIONS.map((option) => {
+            const active = theme === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setTheme(option.value)}
+                className={[
+                  "relative rounded-xl border p-4 text-left transition-all",
+                  active
+                    ? "border-primary bg-primary/10 shadow-sm"
+                    : "bg-card hover:border-primary/40 hover:bg-accent/60",
+                ].join(" ")}
+              >
+                <span className="text-xl" aria-hidden="true">{option.icon}</span>
+                <span className="mt-3 block text-sm font-semibold">{option.label}</span>
+                <span className="mt-1 block text-xs text-muted-foreground">{option.hint}</span>
+                {active ? <span className="absolute right-3 top-3 text-primary">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-      {/* Texto explicativo */}
-      <p className="text-xs text-muted-foreground leading-relaxed">
-        Referência para seus dias de trabalho. O cálculo de atraso considera apenas a data de vencimento.
-      </p>
+      <section className="surface-card p-4 sm:p-5 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Dias que você trabalha</h2>
+          <p className="text-sm text-muted-foreground">Referência para sua rotina de cobrança.</p>
+        </div>
+        <div className="space-y-2">
+          {DIAS_SEMANA.map((dia: { valor: number; label: string }) => (
+            <label
+              key={dia.valor}
+              className="flex items-center gap-3 rounded-xl border bg-background/60 p-3 cursor-pointer hover:bg-accent transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={diasSelecionados.includes(dia.valor)}
+                onChange={() => toggleDia(dia.valor)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <span className="text-sm font-medium text-card-foreground">{dia.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          O cálculo de atraso considera apenas a data de vencimento.
+        </p>
+      </section>
 
-      {/* Mensagem de cobrança */}
-      <div className="space-y-2">
-        <div className="space-y-1">
+      <section className="surface-card p-4 sm:p-5 space-y-3">
+        <div>
           <h2 className="text-lg font-semibold text-foreground">Mensagem de cobrança</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Texto usado pelo botão Cobrar. Deixe em branco para voltar ao padrão do sistema.
           </p>
         </div>
@@ -167,7 +200,7 @@ export function SettingsPage() {
           value={mensagemCobranca}
           onChange={(e) => setMensagemCobranca(e.target.value)}
           rows={4}
-          className="w-full rounded-md border border-input bg-card p-3 text-sm"
+          className="w-full rounded-xl border border-input bg-background/70 p-3 text-sm"
           placeholder="Olá, {cliente}. Sua parcela {parcela}/{totalParcelas} de {produto}..."
         />
         <p className="text-xs text-muted-foreground leading-relaxed">
@@ -176,43 +209,39 @@ export function SettingsPage() {
         <p className="text-xs text-muted-foreground">
           Cobranças com PIX recebem a chave automaticamente no fim da mensagem.
         </p>
-      </div>
+      </section>
 
-      {/* Botão Salvar */}
       <button
         onClick={handleSalvar}
         disabled={salvando || diasSelecionados.length === 0}
-        className="w-full inline-flex items-center justify-center rounded-md bg-primary text-primary-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full inline-flex items-center justify-center rounded-xl bg-primary text-primary-foreground h-11 px-4 py-2 text-sm font-semibold shadow-soft hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
-        {salvando ? "Salvando..." : "Salvar"}
+        {salvando ? "Salvando..." : "Salvar configurações"}
       </button>
 
-      {/* Seção de Backup */}
-      <div className="pt-6 border-t space-y-4">
-        <div className="space-y-1">
+      <section className="surface-card p-4 sm:p-5 space-y-4">
+        <div>
           <h2 className="text-lg font-semibold text-foreground">Backup de Dados</h2>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Exporte ou importe seus dados para segurança ou restauração.
           </p>
         </div>
 
         {backupError && (
-          <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
             {backupError}
           </div>
         )}
 
-        <div className="space-y-2">
-          {/* Botão Exportar backup */}
+        <div className="grid gap-2 sm:grid-cols-2">
           <button
             onClick={handleExportar}
             disabled={exportando || importando || limpando}
-            className="w-full inline-flex items-center justify-center rounded-md border border-input bg-background text-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center rounded-xl border border-input bg-background text-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
           >
             {exportando ? "Exportando..." : "Exportar backup"}
           </button>
 
-          {/* Botão Importar backup + file input */}
           <input
             type="file"
             accept=".json,application/json"
@@ -223,25 +252,23 @@ export function SettingsPage() {
           <button
             onClick={handleTriggerImport}
             disabled={exportando || importando || limpando}
-            className="w-full inline-flex items-center justify-center rounded-md border border-input bg-background text-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center rounded-xl border border-input bg-background text-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 transition-colors"
           >
             {importando ? "Importando..." : "Importar backup"}
           </button>
-
-          {/* Botão Limpar todos os dados */}
-          <button
-            onClick={handleLimparDados}
-            disabled={exportando || importando || limpando}
-            className="w-full inline-flex items-center justify-center rounded-md bg-destructive text-destructive-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {limpando ? "Limpando..." : "Limpar todos os dados"}
-          </button>
         </div>
-      </div>
 
-      {/* Toast de confirmação */}
+        <button
+          onClick={handleLimparDados}
+          disabled={exportando || importando || limpando}
+          className="w-full inline-flex items-center justify-center rounded-xl bg-destructive text-destructive-foreground h-10 px-4 py-2 text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+        >
+          {limpando ? "Limpando..." : "Limpar todos os dados"}
+        </button>
+      </section>
+
       {toastMsg && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 rounded-md bg-card border px-4 py-2 text-sm text-card-foreground shadow-lg">
+        <div className="fixed bottom-24 md:bottom-4 left-1/2 -translate-x-1/2 rounded-xl bg-card border px-4 py-2 text-sm text-card-foreground shadow-lg">
           {toastMsg}
         </div>
       )}
