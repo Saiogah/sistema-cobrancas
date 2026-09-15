@@ -1,6 +1,7 @@
 import type { Config } from 'tailwindcss';
 
 export default {
+  darkMode: 'class',
   content: [
     './App.tsx',
     './main.tsx',
@@ -49,6 +50,9 @@ export default {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
+      },
+      boxShadow: {
+        soft: '0 14px 35px -20px rgba(76, 81, 191, 0.32)',
       },
     },
   },
