@@ -34,8 +34,6 @@ export interface ConfiguracaoRecord {
   diasTrabalhados: string;
   /** Modelo configurável da mensagem de cobrança. null = usar templates internos. */
   mensagemCobranca?: string | null;
-  /** Preferência de aparência. null/undefined = "system" (segue o sistema operacional). */
-  tema?: 'light' | 'dark' | 'system' | null;
   created_date: string;
   updated_date: string;
 }
@@ -43,13 +41,11 @@ export interface ConfiguracaoRecord {
 export interface ConfiguracaoInput {
   diasTrabalhados: string | number[];
   mensagemCobranca?: string | null;
-  tema?: 'light' | 'dark' | 'system' | null;
 }
 
 export interface ConfiguracaoUpdate {
   diasTrabalhados?: string | number[];
   mensagemCobranca?: string | null;
-  tema?: 'light' | 'dark' | 'system' | null;
 }
 
 // -----------------------------------------------------------------------------
@@ -619,7 +615,6 @@ export const Configuracao: BaseEntityApi<ConfiguracaoRecord, ConfiguracaoInput, 
     return configBase.create({
       diasTrabalhados: formatDiasTrabalhados(data.diasTrabalhados),
       mensagemCobranca: data.mensagemCobranca ?? null,
-      tema: data.tema ?? null,
     });
   },
 
@@ -630,9 +625,6 @@ export const Configuracao: BaseEntityApi<ConfiguracaoRecord, ConfiguracaoInput, 
     }
     if (data.mensagemCobranca !== undefined) {
       patch.mensagemCobranca = data.mensagemCobranca;
-    }
-    if (data.tema !== undefined) {
-      patch.tema = data.tema;
     }
     return configBase.update(id, patch);
   },

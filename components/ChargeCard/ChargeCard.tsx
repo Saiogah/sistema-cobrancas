@@ -47,7 +47,7 @@ function ChargeCardBase(props: ChargeCardProps) {
   const podeCobrar = parcela.status === "pendente" || parcela.status === "pago_parcial";
 
   return React.createElement("div", {
-    className: `rounded-lg border bg-card p-3 ${mostrarAtraso ? (dias <= 3 ? "border-orange-300 dark:border-orange-700" : "border-red-400 dark:border-red-700") : ""}`
+    className: `rounded-lg border bg-card p-3 ${mostrarAtraso ? (dias <= 3 ? "border-orange-300" : "border-red-400") : ""}`
   },
     React.createElement("div", { className: "flex items-center gap-3" },
       props.onSelect ? React.createElement("button", {
@@ -61,8 +61,8 @@ function ChargeCardBase(props: ChargeCardProps) {
       React.createElement("div", { className: "flex flex-col items-end gap-1" },
         React.createElement("span", { className: "font-semibold text-foreground" }, formatarMoeda(parcela.valor)),
         // AL-07 fix: cobrado mostra badge amarelo em vez de atrasado
-        mostrarAtraso ? React.createElement("span", { className: "text-xs text-red-600 dark:text-red-400" }, `Atrasada há ${dias} ${dias === 1 ? "dia" : "dias"}`)
-          : isPP ? React.createElement("span", { className: "text-xs text-blue-600 dark:text-blue-400" },
+        mostrarAtraso ? React.createElement("span", { className: "text-xs text-red-600" }, `Atrasada há ${dias} ${dias === 1 ? "dia" : "dias"}`)
+          : isPP ? React.createElement("span", { className: "text-xs text-blue-600" },
               // AL-08 fix: formatarMoeda já inclui R$, não duplicar
               `${formatarMoeda(parcela.valorPago || 0)} de ${formatarMoeda(parcela.valor)}`)
           : parcela.status === "cobrado" ? React.createElement(StatusBadge, { status: "cobrado" })
@@ -99,7 +99,7 @@ function ChargeCardBase(props: ChargeCardProps) {
               `Já pago: ${formatarMoeda(parcela.valorPago || 0)} · Saldo restante: ${formatarMoeda(parcela.valor - (parcela.valorPago || 0))}`) : null,
             // Pagamento parcial não é exposto aqui: nesta interface marca-se apenas o pagamento total (marcarPago).
             React.createElement("div", { className: "flex items-center gap-1 flex-wrap" },
-              React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarTotal(); }, className: "rounded-md bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-2.5 py-1 text-xs font-medium" }, "Marcar parcela como paga"),
+              React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); handleMarcarTotal(); }, className: "rounded-md bg-emerald-100 text-emerald-700 px-2.5 py-1 text-xs font-medium" }, "Marcar parcela como paga"),
               React.createElement("button", { onClick: (e: any) => { e.stopPropagation(); setMenuPago(false); }, className: "text-xs text-muted-foreground px-1" }, "✕"),
             ),
           ),
