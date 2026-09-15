@@ -197,7 +197,7 @@ function ClientCard(props: ClientCardProps) {
       ),
       React.createElement("div", { className: "flex items-center gap-2" },
         React.createElement("span", {
-          className: cliente.ativo ? "rounded-md bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700" : "rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground",
+          className: cliente.ativo ? "rounded-md bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400" : "rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground",
           onClick: (e: any) => { e.stopPropagation(); if (!cliente.ativo) props.onReativar(); },
         }, cliente.ativo ? "Ativo" : "Inativo"),
         cobrancas.length > 0 ? React.createElement("span", { className: "text-xs text-muted-foreground" }, `${cobrancas.length} cobrança(s)`) : null,
@@ -220,7 +220,7 @@ function ClientCard(props: ClientCardProps) {
               React.createElement("button", { onClick: props.onEdit, className: "rounded-md border px-3 py-1 text-xs" }, "Editar"),
               cliente.ativo
                 ? React.createElement("button", { onClick: props.onInativar, className: "rounded-md border px-3 py-1 text-xs text-destructive" }, "Inativar")
-                : React.createElement("button", { onClick: props.onReativar, className: "rounded-md border px-3 py-1 text-xs text-emerald-600" }, "Reativar"),
+                : React.createElement("button", { onClick: props.onReativar, className: "rounded-md border px-3 py-1 text-xs text-emerald-600 dark:text-emerald-400" }, "Reativar"),
             ),
           ),
       cLoading

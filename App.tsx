@@ -18,10 +18,12 @@ import { AppNavigation } from './components/AppNavigation';
 import { OnboardingGuide } from './components/OnboardingGuide';
 import { Cliente, ProdutoServico, Cobranca } from './api/entities';
 import { eventBus } from './lib/event-bus';
+import { useTheme } from './hooks/useTheme';
 
 interface OnboardingCounts { clientes: number; produtos: number; cobrancas: number; }
 
 function MainApp() {
+  useTheme();
   const [counts, setCounts] = useState<OnboardingCounts | null>(null);
   const [onboardingAtivo, setOnboardingAtivo] = useState(false);
 

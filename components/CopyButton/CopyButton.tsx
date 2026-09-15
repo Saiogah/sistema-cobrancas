@@ -33,7 +33,7 @@ function CopyButtonBase({ text, label = "Copiar", className }: CopyButtonProps) 
 
   const baseClass = "inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring px-3 py-1.5";
   const stateClass = copied
-    ? "bg-emerald-100 text-emerald-700"
+    ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
     : "bg-secondary text-secondary-foreground hover:bg-secondary/80";
 
   return React.createElement(

@@ -4,12 +4,20 @@ import { useState, useEffect, useRef } from "react";
 import { useConfig } from "../hooks/useConfig";
 import { DIAS_SEMANA } from "../config/app.config";
 import { MENSAGEM_COBRANCA_DEFAULT } from "../config/messages.config";
+import type { Tema } from "../hooks/useConfig";
+
+const OPCOES_TEMA: { id: Tema; label: string }[] = [
+  { id: "light", label: "Claro" },
+  { id: "dark", label: "Escuro" },
+  { id: "system", label: "Sistema" },
+];
 import { exportarDados, importarDados, limparDados } from "../lib/backup";
 
 export function SettingsPage() {
   const { config, loading, error, salvar } = useConfig();
   const [diasSelecionados, setDiasSelecionados] = useState<number[]>([]);
   const [mensagemCobranca, setMensagemCobranca] = useState("");
+  const [tema, setTema] = useState<Tema>("system");
   const [salvando, setSalvando] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
@@ -25,6 +33,7 @@ export function SettingsPage() {
     if (config) {
       setDiasSelecionados(config.diasTrabalhados);
       setMensagemCobranca(config.mensagemCobranca ?? MENSAGEM_COBRANCA_DEFAULT);
+      setTema(config.tema);
     }
   }, [config]);
 
@@ -43,7 +52,7 @@ export function SettingsPage() {
       mensagemCobranca === (config?.mensagemCobranca ?? MENSAGEM_COBRANCA_DEFAULT)
         ? undefined
         : mensagemCobranca;
-    const ok = await salvar(diasSelecionados, mensagemParaSalvar);
+    const ok = await salvar(diasSelecionados, mensagemParaSalvar, tema);
     setSalvando(false);
     if (ok) {
       setToastMsg("Configuração salva com sucesso!");
@@ -154,6 +163,33 @@ export function SettingsPage() {
       <p className="text-xs text-muted-foreground leading-relaxed">
         Referência para seus dias de trabalho. O cálculo de atraso considera apenas a data de vencimento.
       </p>
+
+      {/* Aparência */}
+      <div className="space-y-2">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-foreground">Aparência</h2>
+          <p className="text-xs text-muted-foreground">
+            Escolha o tema da interface. "Sistema" acompanha a preferência do seu dispositivo.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          {OPCOES_TEMA.map((opcao) => (
+            <button
+              key={opcao.id}
+              type="button"
+              onClick={() => setTema(opcao.id)}
+              aria-pressed={tema === opcao.id}
+              className={
+                tema === opcao.id
+                  ? "rounded-md border border-primary bg-primary text-primary-foreground h-10 px-2 text-sm font-medium transition-colors"
+                  : "rounded-md border border-input bg-background text-foreground h-10 px-2 text-sm font-medium hover:bg-accent transition-colors"
+              }
+            >
+              {opcao.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Mensagem de cobrança */}
       <div className="space-y-2">

@@ -12,18 +12,21 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Configuracao as ConfiguracaoAPI } from "../api/entities";
 import { DIAS_TRABALHADOS_DEFAULT } from "../config/app.config";
 
+export type Tema = 'light' | 'dark' | 'system';
+
 export interface ConfigData {
   id: string;
   diasTrabalhados: number[];
   mensagemCobranca: string | null;
+  tema: Tema;
 }
 
 export interface UseConfigResult {
   config: ConfigData | null;
   loading: boolean;
   error: string | null;
-  /** mensagemCobranca opcional: undefined = não alterar; "" = limpar (volta aos templates internos) */
-  salvar: (diasTrabalhados: number[], mensagemCobranca?: string) => Promise<boolean>;
+  /** mensagemCobranca: undefined = não alterar; "" = limpar. tema: undefined = não alterar. */
+  salvar: (diasTrabalhados: number[], mensagemCobranca?: string, tema?: Tema) => Promise<boolean>;
 }
 
 /**
@@ -61,6 +64,7 @@ export function useConfig(): UseConfigResult {
           id: record.id,
           diasTrabalhados: parseDiasTrabalhados(record.diasTrabalhados),
           mensagemCobranca: record.mensagemCobranca ?? null,
+          tema: record.tema ?? "system",
         });
       } else {
         // Criar com defaults
@@ -72,6 +76,7 @@ export function useConfig(): UseConfigResult {
           id: created.id,
           diasTrabalhados: parseDiasTrabalhados(created.diasTrabalhados),
           mensagemCobranca: created.mensagemCobranca ?? null,
+          tema: created.tema ?? "system",
         });
       }
     } catch (e) {
@@ -87,18 +92,22 @@ export function useConfig(): UseConfigResult {
   }, [fetchConfig]);
 
   // mensagemCobranca opcional: undefined = não alterar; "" = limpar (volta aos templates internos)
-  const salvar = useCallback(async (diasTrabalhados: number[], mensagemCobranca?: string): Promise<boolean> => {
+  // tema opcional: undefined = não alterar
+  const salvar = useCallback(async (diasTrabalhados: number[], mensagemCobranca?: string, tema?: Tema): Promise<boolean> => {
     if (!configIdRef.current) {
       setError("Configuração ainda não carregada");
       return false;
     }
     try {
       const serialized = serializeDiasTrabalhados(diasTrabalhados);
-      const patch: { diasTrabalhados: string; mensagemCobranca?: string | null } = {
+      const patch: { diasTrabalhados: string; mensagemCobranca?: string | null; tema?: Tema } = {
         diasTrabalhados: serialized,
       };
       if (mensagemCobranca !== undefined) {
         patch.mensagemCobranca = mensagemCobranca.trim() === "" ? null : mensagemCobranca;
+      }
+      if (tema !== undefined) {
+        patch.tema = tema;
       }
       await ConfiguracaoAPI.update(configIdRef.current, patch);
       setConfig(prev => ({
@@ -108,6 +117,7 @@ export function useConfig(): UseConfigResult {
           mensagemCobranca !== undefined
             ? (mensagemCobranca.trim() === "" ? null : mensagemCobranca)
             : (prev?.mensagemCobranca ?? null),
+        tema: tema !== undefined ? tema : (prev?.tema ?? "system"),
       }));
       return true;
     } catch (e) {

@@ -33,10 +33,10 @@ function StatusBadgeBase({ status, diasAtraso }: StatusBadgeProps) {
   if (isAtrasado) {
     if (diasAtraso! <= 3) {
       label = `Atrasada há ${diasAtraso} ${diasAtraso === 1 ? "dia" : "dias"}`;
-      className = "inline-flex items-center rounded-md bg-orange-100 px-2.5 py-1 text-xs font-medium text-orange-700";
+      className = "inline-flex items-center rounded-md bg-orange-100 dark:bg-orange-900/30 px-2.5 py-1 text-xs font-medium text-orange-700 dark:text-orange-400";
     } else {
       label = `Atrasada há ${diasAtraso} dias`;
-      className = "inline-flex items-center rounded-md bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700";
+      className = "inline-flex items-center rounded-md bg-red-100 dark:bg-red-900/30 px-2.5 py-1 text-xs font-medium text-red-700 dark:text-red-400";
     }
   } else {
     switch (status) {
@@ -46,15 +46,15 @@ function StatusBadgeBase({ status, diasAtraso }: StatusBadgeProps) {
         break;
       case "cobrado":
         label = "Cobrado";
-        className = "inline-flex items-center rounded-md bg-yellow-100 px-2.5 py-1 text-xs font-medium text-yellow-700";
+        className = "inline-flex items-center rounded-md bg-yellow-100 dark:bg-yellow-900/30 px-2.5 py-1 text-xs font-medium text-yellow-700 dark:text-yellow-400";
         break;
       case "pago":
         label = "Pago";
-        className = "inline-flex items-center rounded-md bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700";
+        className = "inline-flex items-center rounded-md bg-emerald-100 dark:bg-emerald-900/30 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-400";
         break;
       case "pago_parcial":
         label = "Pago parcial";
-        className = "inline-flex items-center rounded-md bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700";
+        className = "inline-flex items-center rounded-md bg-blue-100 dark:bg-blue-900/30 px-2.5 py-1 text-xs font-medium text-blue-700 dark:text-blue-400";
         break;
       case "arquivado":
         label = "Arquivado";
