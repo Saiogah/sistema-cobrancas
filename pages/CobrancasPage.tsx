@@ -1,22 +1,28 @@
-// pages/CobrancasPage.tsx — Visão geral de todas as parcelas (Etapa 3A — consulta)
-// Lista todas as parcelas de todos os clientes com filtros por categoria e busca.
-// Nesta etapa é apenas consulta: ações de pagamento entram na Etapa 3B (useParcelActions).
+// pages/CobrancasPage.tsx — Visão geral de todas as parcelas (Etapa 3A + 3B)
+// Agrupada por Cliente → Cobrança/produto → Parcelas, com filtros e busca.
+// Ações: Marcar parcela como paga (marcarPago) e Desfazer pagamento (desfazerPagamento),
+// ambos reutilizados de useParcelActions. Pagamento parcial não é exposto aqui.
 import React, { useState, useEffect, useCallback } from "react";
 import { Parcela as ParcelaAPI, Cliente as ClienteAPI, Cobranca as CobrancaAPI } from "../api/entities";
 import { eventBus } from "../lib/event-bus";
 import { formatarMoeda } from "../lib/format.utils";
 import { formatarDataCurta, hoje } from "../lib/date.utils";
 import { isAtrasada, diasAtraso } from "../domain/overdue.rules";
+import { useParcelActions } from "../hooks/useParcelActions";
 import { SearchInput } from "../components/SearchInput";
 import { EmptyState } from "../components/EmptyState";
 import { StatusBadge } from "../components/StatusBadge";
+import { ActionToast } from "../components/ActionToast";
 import type { Parcela } from "../types/parcel.types";
 import type { Cobranca } from "../types/charge.types";
 import type { Cliente } from "../types/client.types";
 import type { ParcelaStatus } from "../types/common.types";
+import type { EstadoAnterior } from "../types/common.types";
 
 type Categoria = "pendente" | "vencida" | "futura" | "paga" | "pago_parcial" | "arquivada";
 type Filtro = "todas" | Categoria;
+
+interface Item { parcela: Parcela; categoria: Categoria; }
 
 const FILTROS: { id: Filtro; label: string }[] = [
   { id: "todas", label: "Todas" },
@@ -61,6 +67,10 @@ export function CobrancasPage() {
   const [filtro, setFiltro] = useState<Filtro>("todas");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
+  const [processando, setProcessando] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{ message: string; retry: () => void } | null>(null);
+  const parcelActions = useParcelActions();
 
   const carregar = useCallback(async () => {
     try {
@@ -100,21 +110,76 @@ export function CobrancasPage() {
     return () => unsubs.forEach(u => u());
   }, [carregar]);
 
+  // Marca somente esta parcela como paga (pagamento total, inclusive antecipado).
+  // Reutiliza marcarPago; a atualização da página vem do evento parcel:paid → carregar().
+  const marcarPago = useCallback(async (p: Parcela) => {
+    if (processando) return;
+    setProcessando(p.id);
+    try {
+      await parcelActions.marcarPago(p);
+    } catch {
+      setActionError({ message: "Erro ao marcar como pago. Tente novamente.", retry: () => void marcarPago(p) });
+    } finally {
+      setProcessando(null);
+    }
+  }, [parcelActions, processando]);
+
+  // Desfaz o pagamento desta parcela — mesmo padrão/confirm do ClientsPage (MÉD-01).
+  const desfazer = useCallback(async (par: Parcela) => {
+    const confirmado = window.confirm("Desfazer o pagamento desta parcela e voltar ao status anterior?");
+    if (!confirmado) return;
+    const est: EstadoAnterior = {
+      status: par.dataCobrancaEnviada ? "cobrado" : "pendente",
+      valorPago: null,
+      dataPagamento: null,
+      dataCobrancaEnviada: par.dataCobrancaEnviada,
+    };
+    try {
+      await parcelActions.desfazerPagamento(par.id, est);
+    } catch {
+      setActionError({ message: "Erro ao desfazer pagamento. Tente novamente.", retry: () => void desfazer(par) });
+    }
+  }, [parcelActions]);
+
+  const toggleCliente = useCallback((clienteId: string) => {
+    setExpandidos(prev => ({ ...prev, [clienteId]: !prev[clienteId] }));
+  }, []);
+
   const dataHoje = hoje();
-  const comCategoria = parcelas.map(p => ({ parcela: p, categoria: categoriaDe(p, dataHoje) }));
+  const comCategoria: Item[] = parcelas.map(p => ({ parcela: p, categoria: categoriaDe(p, dataHoje) }));
 
+  // Filtro + busca aplicados na lista plana; o agrupamento usa apenas os sobreviventes,
+  // portanto nunca se formam grupos (cliente/cobrança) vazios.
   const termo = busca.toLowerCase();
-  const porBusca = busca
-    ? comCategoria.filter(({ parcela: p }) =>
-        (nomes[p.clienteId] || "").toLowerCase().includes(termo)
-        || (cobrancas[p.cobrancaId]?.nomeProdutoServico || "").toLowerCase().includes(termo))
-    : comCategoria;
-
-  const visiveis = (filtro === "todas" ? porBusca : porBusca.filter(x => x.categoria === filtro))
-    .slice()
+  const visiveis = (filtro === "todas"
+    ? comCategoria
+    : comCategoria.filter(x => x.categoria === filtro))
+    .filter(({ parcela: p }) => !busca
+      || (nomes[p.clienteId] || "").toLowerCase().includes(termo)
+      || (cobrancas[p.cobrancaId]?.nomeProdutoServico || "").toLowerCase().includes(termo))
     .sort((a, b) => a.parcela.dataVencimento === b.parcela.dataVencimento
       ? a.parcela.numeroParcela - b.parcela.numeroParcela
       : a.parcela.dataVencimento < b.parcela.dataVencimento ? -1 : 1);
+
+  // Agrupamento em memória: Cliente → Cobrança/produto → parcelas visíveis.
+  const porCliente = new Map<string, { nome: string; cobrancas: Map<string, { nome: string; parcelas: Item[] }> }>();
+  for (const item of visiveis) {
+    const p = item.parcela;
+    let g = porCliente.get(p.clienteId);
+    if (!g) {
+      g = { nome: nomes[p.clienteId] || "Cliente", cobrancas: new Map() };
+      porCliente.set(p.clienteId, g);
+    }
+    let cb = g.cobrancas.get(p.cobrancaId);
+    if (!cb) {
+      cb = { nome: cobrancas[p.cobrancaId]?.nomeProdutoServico || "Produto", parcelas: [] };
+      g.cobrancas.set(p.cobrancaId, cb);
+    }
+    cb.parcelas.push(item);
+  }
+  const grupos = [...porCliente.entries()]
+    .sort((a, b) => a[1].nome.localeCompare(b[1].nome))
+    .map(([clienteId, g]) => ({ clienteId, nome: g.nome, cobrancas: [...g.cobrancas.values()] }));
 
   if (loading) return React.createElement("div", { className: "flex justify-center py-12" }, React.createElement("p", { className: "text-muted-foreground" }, "Carregando..."));
   if (error) return React.createElement("div", { className: "flex justify-center py-12" }, React.createElement("p", { className: "text-destructive" }, `Erro: ${error}`));
@@ -137,35 +202,76 @@ export function CobrancasPage() {
         }, `${f.label} (${qtd})`);
       }),
     ),
-    visiveis.length === 0
+    grupos.length === 0
       ? React.createElement(EmptyState, {
           title: busca || filtro !== "todas" ? "Nenhum resultado" : "Nenhuma parcela",
           description: busca || filtro !== "todas" ? "Ajuste a busca ou o filtro" : "Cadastre uma cobrança para começar",
         })
       : React.createElement("div", { className: "flex flex-col gap-2" },
-          ...visiveis.map(({ parcela: p, categoria }) => {
-            const pago = p.valorPago || 0;
-            const saldo = p.valor - pago;
-            const cob = cobrancas[p.cobrancaId];
-            const total = cob?.quantidadeParcelas || 1;
-            return React.createElement("div", { key: p.id, className: "rounded-lg border bg-card p-3" },
-              React.createElement("div", { className: "flex items-center justify-between gap-2" },
+          ...grupos.map(g => {
+            const itens = g.cobrancas.flatMap(cb => cb.parcelas);
+            const pagas = itens.filter(x => x.parcela.status === "pago").length;
+            const emAberto = itens.filter(x => x.parcela.status !== "pago" && !x.parcela.arquivada).length;
+            const aberto = !!expandidos[g.clienteId];
+            return React.createElement("div", { key: g.clienteId, className: "rounded-lg border bg-card" },
+              // Cabeçalho do cliente (resumo derivado, nada persistido)
+              React.createElement("div", {
+                className: "flex items-center justify-between gap-2 p-3 cursor-pointer hover:bg-accent rounded-lg",
+                onClick: () => toggleCliente(g.clienteId),
+              },
                 React.createElement("div", { className: "flex-1 min-w-0" },
-                  React.createElement("span", { className: "font-medium block truncate" }, nomes[p.clienteId] || "Cliente"),
-                  React.createElement("span", { className: "text-xs text-muted-foreground block truncate" },
-                    `${cob?.nomeProdutoServico || "Produto"} · ${p.numeroParcela}/${total}`),
+                  React.createElement("span", { className: "font-medium block truncate" }, g.nome),
+                  React.createElement("span", { className: "text-xs text-muted-foreground" },
+                    `${itens.length} parcela${itens.length > 1 ? "s" : ""} · ${pagas} paga${pagas === 1 ? "" : "s"} · ${emAberto} em aberto`),
                 ),
-                React.createElement("div", { className: "flex flex-col items-end gap-1 flex-shrink-0" },
-                  React.createElement("span", { className: "font-semibold" }, formatarMoeda(p.valor)),
-                  renderBadge(p, categoria, dataHoje),
-                ),
+                React.createElement("span", { className: "text-muted-foreground text-xs" }, aberto ? "▾" : "▸"),
               ),
-              React.createElement("div", { className: "text-xs text-muted-foreground mt-1" },
-                `Vencimento: ${formatarDataCurta(p.dataVencimento)} · Pago: ${formatarMoeda(pago)} · Saldo: ${formatarMoeda(saldo)}`),
+              // Expandido: cobranças/produtos com suas parcelas
+              aberto ? React.createElement("div", { className: "px-3 pb-3 flex flex-col gap-3" },
+                ...g.cobrancas.map(cb => {
+                  const total = cobrancas[cb.parcelas[0].parcela.cobrancaId]?.quantidadeParcelas || 1;
+                  return React.createElement("div", { key: cb.nome + cb.parcelas[0].parcela.cobrancaId, className: "flex flex-col" },
+                    React.createElement("span", { className: "text-xs font-medium text-muted-foreground" },
+                      `${cb.nome} (${cb.parcelas.length})`),
+                    ...cb.parcelas.map(({ parcela: p, categoria }) => {
+                      const pago = p.valorPago || 0;
+                      const saldo = p.valor - pago;
+                      const isPago = p.status === "pago" || p.status === "pago_parcial";
+                      return React.createElement("div", { key: p.id, className: "py-1.5 border-t first:border-t-0" },
+                        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                          React.createElement("span", { className: "text-sm truncate" },
+                            `${p.numeroParcela}/${total} · ${formatarDataCurta(p.dataVencimento)} · ${formatarMoeda(p.valor)}`),
+                          React.createElement("div", { className: "flex items-center gap-1 flex-shrink-0" },
+                            renderBadge(p, categoria, dataHoje),
+                            !isPago && !p.arquivada ? React.createElement("button", {
+                              onClick: () => void marcarPago(p),
+                              disabled: processando === p.id,
+                              className: "rounded border px-1.5 py-0.5 text-xs hover:bg-accent disabled:opacity-50",
+                              title: "Pagamento total desta parcela (inclui antecipado)",
+                            }, "Marcar parcela como paga") : null,
+                            isPago && !p.arquivada ? React.createElement("button", {
+                              onClick: () => void desfazer(p),
+                              className: "rounded border px-1.5 py-0.5 text-xs hover:bg-accent",
+                              title: "Desfazer pagamento",
+                            }, "↺") : null,
+                          ),
+                        ),
+                        React.createElement("div", { className: "text-xs text-muted-foreground" },
+                          `Pago: ${formatarMoeda(pago)} · Saldo: ${formatarMoeda(saldo)}`),
+                      );
+                    }),
+                  );
+                }),
+              ) : null,
             );
           }),
           React.createElement("div", { className: "text-xs text-muted-foreground" },
             `Mostrando ${visiveis.length} de ${parcelas.length} parcelas`),
         ),
+    actionError ? React.createElement(ActionToast, {
+      message: actionError.message,
+      onRetry: () => { const retry = actionError.retry; setActionError(null); retry(); },
+      onDismiss: () => setActionError(null),
+    }) : null,
   );
 }
