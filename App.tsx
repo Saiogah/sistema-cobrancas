@@ -16,7 +16,6 @@ import { CobrancasPage } from './pages/CobrancasPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppNavigation } from './components/AppNavigation';
 import { DashboardOverview } from './components/DashboardOverview';
-import { OnboardingGuide } from './components/OnboardingGuide';
 import { Cliente, ProdutoServico, Cobranca } from './api/entities';
 import { eventBus } from './lib/event-bus';
 import { useTheme } from './hooks/useTheme';
@@ -75,17 +74,7 @@ function AppRoutes({ counts, onboardingAtivo }: { counts: OnboardingCounts | nul
   );
 }
 
-function DashboardRoute({ counts, onboardingAtivo }: { counts: OnboardingCounts | null; onboardingAtivo: boolean }) {
-  const navigate = useNavigate();
-  if (onboardingAtivo && counts) {
-    return React.createElement(OnboardingGuide, {
-      temClientes: counts.clientes > 0,
-      temProdutos: counts.produtos > 0,
-      onCadastrarClientes: () => navigate('/clientes'),
-      onCadastrarProdutos: () => navigate('/produtos'),
-      onNovaCobranca: () => navigate('/nova'),
-    });
-  }
+function DashboardRoute(_props: { counts: OnboardingCounts | null; onboardingAtivo: boolean }) {
   return React.createElement(React.Fragment, null,
     React.createElement(DashboardOverview),
     React.createElement(DashboardPage),
