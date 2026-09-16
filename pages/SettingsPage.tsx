@@ -181,9 +181,6 @@ export function SettingsPage() {
           <p className="text-xs leading-relaxed text-muted-foreground">
             Variáveis: {"{cliente}"} · {"{produto}"} · {"{parcela}"} · {"{totalParcelas}"} · {"{vencimento}"} · {"{valor}"} · {"{valorPago}"} · {"{saldo}"}
           </p>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            Cobranças com PIX recebem a chave automaticamente no fim da mensagem.
-          </p>
         </div>
       </section>
 
