@@ -144,28 +144,28 @@ export function DashboardOverview() {
   ], [data, loading]);
 
   return (
-    <section className="mx-auto w-full max-w-5xl px-4 pt-7 sm:px-6 sm:pt-8">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <section className="mx-auto w-full max-w-5xl px-4 pt-5 sm:px-6 sm:pt-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-[1.7rem]">
+          <h1 className="text-[1.45rem] font-bold leading-tight tracking-tight text-foreground sm:text-[1.6rem]">
             {getGreeting()} <span aria-hidden="true">👋</span>
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-0.5 text-[13px] leading-5 text-muted-foreground sm:text-sm">
             Aqui está o resumo das suas cobranças de hoje.
           </p>
         </div>
-        <p className="text-xs text-muted-foreground sm:pb-1 sm:text-sm">{formatLongDate()}</p>
+        <p className="text-xs text-muted-foreground sm:pb-0.5 sm:text-[13px]">{formatLongDate()}</p>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-4 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(card => (
-          <div key={card.label} className={`rounded-2xl border p-4 shadow-sm transition-colors ${card.accent}`}>
-            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-base ${card.iconStyle}`} aria-hidden="true">
+          <div key={card.label} className={`rounded-xl border p-3.5 shadow-sm transition-colors ${card.accent}`}>
+            <div className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm ${card.iconStyle}`} aria-hidden="true">
               {card.icon}
             </div>
-            <p className="mt-3 text-sm font-medium text-muted-foreground">{card.label}</p>
-            <p className="mt-1 text-xl font-bold tracking-tight text-foreground">{card.value}</p>
-            <p className={`mt-1 text-xs font-medium ${card.detailStyle}`}>{card.detail}</p>
+            <p className="mt-2 text-[13px] font-medium leading-5 text-muted-foreground">{card.label}</p>
+            <p className="mt-0.5 text-lg font-bold leading-6 tracking-tight text-foreground">{card.value}</p>
+            <p className={`mt-0.5 text-[11px] font-medium leading-4 ${card.detailStyle}`}>{card.detail}</p>
           </div>
         ))}
       </div>
