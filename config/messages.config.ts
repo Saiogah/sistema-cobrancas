@@ -2,21 +2,21 @@
 
 /**
  * Templates de mensagem de cobrança.
- * Placeholders: [Nome], [Valor], [Produto], [Data], [PIX], [SaldoDevedor]
+ * Placeholders: [Nome], [Valor], [Produto], [Data], [SaldoDevedor]
  */
 
 /** Template para parcela vencendo HOJE (não atrasada) */
 export const TEMPLATE_HOJE = `Olá [Nome]!
 
 Sua parcela de R$ [Valor] referente a [Produto] vence hoje ([Data]).
-[PIX]
+
 Obrigada!`;
 
 /** Template para parcela ATRASADA */
 export const TEMPLATE_ATRASADA = `Olá [Nome]!
 
 Sua parcela de R$ [Valor] referente a [Produto] venceu no dia [Data] e ainda não foi recebida.
-[PIX]
+
 Pode verificar o pagamento?
 
 Obrigada!`;
@@ -25,14 +25,10 @@ Obrigada!`;
 export const TEMPLATE_PAGO_PARCIAL = `Olá [Nome]!
 
 Sua parcela de R$ [ValorTotal] referente a [Produto] tem R$ [SaldoDevedor] pendentes.
-[PIX]
+
 Pode verificar o pagamento?
 
 Obrigada!`;
-
-/** Bloco PIX inserido no template quando a forma de pagamento é PIX */
-export const BLOCO_PIX = `Forma de pagamento: PIX
-Chave: [PIX]`;
 
 /** Tipo identificador de qual template usar */
 export type TipoTemplate = "hoje" | "atrasada" | "pago_parcial";
@@ -59,6 +55,5 @@ export function selecionarTemplate(
  *
  * Variáveis substituídas em tempo de geração (nenhum dado novo é persistido):
  * {cliente} {produto} {parcela} {totalParcelas} {vencimento} {valor} {valorPago} {saldo}
- * O bloco PIX é anexado automaticamente quando a cobrança usa PIX.
  */
 export const MENSAGEM_COBRANCA_DEFAULT = `Olá, {cliente}. Sua parcela {parcela}/{totalParcelas} de {produto}, no valor de {valor}, vence em {vencimento}.`;
