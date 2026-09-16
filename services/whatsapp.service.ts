@@ -7,7 +7,6 @@ import {
   TEMPLATE_HOJE,
   TEMPLATE_ATRASADA,
   TEMPLATE_PAGO_PARCIAL,
-  BLOCO_PIX,
   selecionarTemplate,
 } from "../config/messages.config";
 import { formatarMoeda, formatarMoedaSimples } from "../lib/format.utils";
@@ -24,16 +23,6 @@ export function gerarLinkWhatsApp(telefone: string, mensagem: string): string {
   return url;
 }
 
-/**
- * Gera a mensagem de cobrança baseada no estado da parcela.
- * Seleciona o template apropriado e substitui os placeholders.
- *
- * @param parcela - Dados da parcela
- * @param cobranca - Dados da cobrança pai
- * @param cliente - Dados do cliente
- * @param dataHoje - Data de hoje no formato YYYY-MM-DD (para determinar se está atrasada)
- * @returns Mensagem formatada pronta para envio
- */
 /**
  * Substitui as variáveis do modelo configurado pelos dados reais da parcela.
  * Única forma de gerar mensagem a partir do template da Config — reutilizada
@@ -67,18 +56,11 @@ export function gerarMensagem(
   const isPagoParcial = parcela.status === "pago_parcial";
   const tipo = selecionarTemplate(isAtrasada, isPagoParcial);
 
-  // Bloco PIX: apenas se forma=pix e pixUtilizado não vazio
-  const blocoPix =
-    cobranca.formaPagamento === "pix" && cobranca.pixUtilizado
-      ? BLOCO_PIX.replace("[PIX]", cobranca.pixUtilizado)
-      : "";
-
   // Mensagem configurada na página Config (fonte única do template). Sem mensagem
-  // configurada, os templates internos abaixo continuam valendo (comportamento atual).
+  // configurada, os templates internos abaixo continuam valendo.
   const modeloConfigurado = mensagemCobranca && mensagemCobranca.trim() !== "" ? mensagemCobranca : null;
   if (modeloConfigurado) {
-    const mensagem = substituirVariaveis(modeloConfigurado, parcela, cobranca, cliente).trim();
-    return blocoPix ? `${mensagem}\n\n${blocoPix}` : mensagem;
+    return substituirVariaveis(modeloConfigurado, parcela, cobranca, cliente).trim();
   }
 
   // Formatações
@@ -101,20 +83,12 @@ export function gerarMensagem(
       break;
   }
 
-  let mensagem = template
+  return template
     .replace(/\[Nome\]/g, cliente.nome)
     .replace(/\[Valor\]/g, valor)
     .replace(/\[ValorTotal\]/g, valorTotal)
     .replace(/\[Produto\]/g, cobranca.nomeProdutoServico)
     .replace(/\[Data\]/g, data)
     .replace(/\[SaldoDevedor\]/g, saldoDevedor)
-    .replace(/\[PIX\]/g, blocoPix);
-
-  // Limpar linhas vazias restantes (quando não há bloco PIX, o placeholder [PIX] vira string vazia)
-  mensagem = mensagem
-    .replace(/\n\n\n/g, "\n\n") // colapsar linhas vazias duplas
-    .replace(/\[PIX\]/g, "") // limpar placeholder residual
     .trim();
-
-  return mensagem;
 }
