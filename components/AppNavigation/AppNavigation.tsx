@@ -22,11 +22,11 @@ function AppNavigationBase({ onLogout }: AppNavigationProps) {
         ...ITEMS.map(item => React.createElement(NavLink, {
           key: item.to, to: item.to, end: item.end,
           className: ({ isActive }: { isActive: boolean }) => [
-            'relative flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs font-medium transition-all md:min-h-16 md:flex-row md:gap-2 md:px-4',
+            'relative flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs transition-all md:min-h-14 md:flex-row md:gap-2 md:px-4',
             'after:absolute after:bottom-0 after:left-1/2 after:h-0.5 after:w-0 after:-translate-x-1/2 after:rounded-full after:bg-primary after:transition-all',
             isActive
-              ? 'text-primary after:w-8 md:after:w-10'
-              : 'text-muted-foreground hover:text-foreground hover:bg-accent/60',
+              ? 'font-semibold text-primary after:w-8 md:after:w-10'
+              : 'font-medium text-muted-foreground hover:bg-accent/30 hover:text-foreground',
           ].join(' '),
         },
           React.createElement('span', { 'aria-hidden': true, className: 'text-lg leading-none drop-shadow-sm' }, item.icon),
