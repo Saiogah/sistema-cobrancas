@@ -110,61 +110,61 @@ export function DashboardOverview() {
       value: loading ? '—' : String(data.clientesAtivos),
       detail: loading ? 'Carregando...' : data.clientesNovosMes > 0 ? `+${data.clientesNovosMes} este mês` : 'Cadastros ativos',
       icon: '👥',
-      accent: 'border-emerald-200/80 bg-emerald-50/65 dark:border-emerald-900/60 dark:bg-emerald-950/20',
-      iconStyle: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300',
+      accent: 'border-emerald-500/15 bg-card/90 dark:border-emerald-400/15 dark:bg-card/95',
+      iconStyle: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/45 dark:text-emerald-300',
       detailStyle: 'text-emerald-600 dark:text-emerald-400',
     },
     {
       label: 'Pagas no mês',
       value: loading ? '—' : formatarMoeda(data.valorPagoNoMes),
       detail: loading ? 'Carregando...' : `${data.pagasNoMes} parcela${data.pagasNoMes === 1 ? '' : 's'}`,
-      icon: '▣',
-      accent: 'border-violet-200/80 bg-violet-50/65 dark:border-violet-900/60 dark:bg-violet-950/20',
-      iconStyle: 'bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300',
+      icon: '💳',
+      accent: 'border-violet-500/15 bg-card/90 dark:border-violet-400/15 dark:bg-card/95',
+      iconStyle: 'bg-violet-100 text-violet-700 dark:bg-violet-900/45 dark:text-violet-300',
       detailStyle: 'text-violet-600 dark:text-violet-400',
     },
     {
       label: 'Em aberto',
       value: loading ? '—' : formatarMoeda(data.valorEmAberto),
       detail: loading ? 'Carregando...' : `${data.parcelasEmAberto} parcela${data.parcelasEmAberto === 1 ? '' : 's'}`,
-      icon: '◷',
-      accent: 'border-orange-200/80 bg-orange-50/65 dark:border-orange-900/60 dark:bg-orange-950/20',
-      iconStyle: 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300',
+      icon: '🕘',
+      accent: 'border-orange-500/15 bg-card/90 dark:border-orange-400/15 dark:bg-card/95',
+      iconStyle: 'bg-orange-100 text-orange-700 dark:bg-orange-900/45 dark:text-orange-300',
       detailStyle: 'text-orange-600 dark:text-orange-400',
     },
     {
       label: 'Próximos vencimentos',
       value: loading ? '—' : String(data.proximosSeteDias),
       detail: 'Nos próximos 7 dias',
-      icon: '▦',
-      accent: 'border-blue-200/80 bg-blue-50/65 dark:border-blue-900/60 dark:bg-blue-950/20',
-      iconStyle: 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300',
+      icon: '📅',
+      accent: 'border-blue-500/15 bg-card/90 dark:border-blue-400/15 dark:bg-card/95',
+      iconStyle: 'bg-blue-100 text-blue-700 dark:bg-blue-900/45 dark:text-blue-300',
       detailStyle: 'text-blue-600 dark:text-blue-400',
     },
   ], [data, loading]);
 
   return (
-    <section className="mx-auto w-full max-w-6xl px-4 pt-8 sm:px-6 sm:pt-10">
+    <section className="mx-auto w-full max-w-5xl px-4 pt-7 sm:px-6 sm:pt-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-[1.7rem]">
             {getGreeting()} <span aria-hidden="true">👋</span>
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground sm:text-base">
+          <p className="mt-1 text-sm text-muted-foreground">
             Aqui está o resumo das suas cobranças de hoje.
           </p>
         </div>
-        <p className="text-sm text-muted-foreground sm:pb-1">{formatLongDate()}</p>
+        <p className="text-xs text-muted-foreground sm:pb-1 sm:text-sm">{formatLongDate()}</p>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map(card => (
           <div key={card.label} className={`rounded-2xl border p-4 shadow-sm transition-colors ${card.accent}`}>
-            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg font-bold ${card.iconStyle}`} aria-hidden="true">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-xl text-base ${card.iconStyle}`} aria-hidden="true">
               {card.icon}
             </div>
             <p className="mt-3 text-sm font-medium text-muted-foreground">{card.label}</p>
-            <p className="mt-1 text-xl font-bold tracking-tight text-foreground sm:text-2xl">{card.value}</p>
+            <p className="mt-1 text-xl font-bold tracking-tight text-foreground">{card.value}</p>
             <p className={`mt-1 text-xs font-medium ${card.detailStyle}`}>{card.detail}</p>
           </div>
         ))}
