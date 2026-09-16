@@ -12,6 +12,11 @@ function EmptyStateBase({ title, description }: EmptyStateProps) {
   const isDashboardEmpty = title === "Nada para cobrar hoje";
 
   if (isDashboardEmpty) {
+    const dashboardDescription = description?.replace(/^✓\s*/, "").trim();
+    const showDashboardDescription = Boolean(
+      dashboardDescription && !/^Tudo em dia!?\s*✓?$/i.test(dashboardDescription)
+    );
+
     return React.createElement(
       "div",
       { className: "surface-card -mb-1 mx-auto w-full max-w-2xl bg-gradient-to-b from-card to-card/90 px-5 py-6 text-center sm:px-8" },
@@ -22,8 +27,8 @@ function EmptyStateBase({ title, description }: EmptyStateProps) {
       ),
       React.createElement("p", { className: "mt-3 text-xl font-semibold leading-7 text-foreground" }, "Tudo em dia!"),
       React.createElement("p", { className: "mt-1 text-[13px] leading-5 text-muted-foreground" }, "Nenhuma cobrança para hoje."),
-      description
-        ? React.createElement("p", { className: "mt-2.5 text-[13px] font-medium leading-5 text-muted-foreground" }, description.replace(/^✓\s*/, ""))
+      showDashboardDescription
+        ? React.createElement("p", { className: "mt-2.5 text-[13px] font-medium leading-5 text-muted-foreground" }, dashboardDescription)
         : null,
       React.createElement(
         Link,
