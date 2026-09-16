@@ -15,6 +15,7 @@ import { ProductsPage } from './pages/ProductsPage';
 import { CobrancasPage } from './pages/CobrancasPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AppNavigation } from './components/AppNavigation';
+import { DashboardOverview } from './components/DashboardOverview';
 import { OnboardingGuide } from './components/OnboardingGuide';
 import { Cliente, ProdutoServico, Cobranca } from './api/entities';
 import { eventBus } from './lib/event-bus';
@@ -85,7 +86,10 @@ function DashboardRoute({ counts, onboardingAtivo }: { counts: OnboardingCounts 
       onNovaCobranca: () => navigate('/nova'),
     });
   }
-  return React.createElement(DashboardPage);
+  return React.createElement(React.Fragment, null,
+    React.createElement(DashboardOverview),
+    React.createElement(DashboardPage),
+  );
 }
 
 function NewChargeRoute() {
