@@ -163,32 +163,6 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="surface-card p-4 sm:p-5 space-y-4">
-        <div>
-          <h2 className="text-lg font-semibold">Dias que você trabalha</h2>
-          <p className="text-sm text-muted-foreground">Referência para sua rotina de cobrança.</p>
-        </div>
-        <div className="space-y-2">
-          {DIAS_SEMANA.map((dia: { valor: number; label: string }) => (
-            <label
-              key={dia.valor}
-              className="flex items-center gap-3 rounded-xl border bg-background/60 p-3 cursor-pointer hover:bg-accent transition-colors"
-            >
-              <input
-                type="checkbox"
-                checked={diasSelecionados.includes(dia.valor)}
-                onChange={() => toggleDia(dia.valor)}
-                className="h-4 w-4 rounded border-input accent-primary"
-              />
-              <span className="text-sm font-medium text-card-foreground">{dia.label}</span>
-            </label>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          O cálculo de atraso considera apenas a data de vencimento.
-        </p>
-      </section>
-
       <section className="surface-card p-4 sm:p-5 space-y-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Mensagem de cobrança</h2>
@@ -210,14 +184,6 @@ export function SettingsPage() {
           Cobranças com PIX recebem a chave automaticamente no fim da mensagem.
         </p>
       </section>
-
-      <button
-        onClick={handleSalvar}
-        disabled={salvando || diasSelecionados.length === 0}
-        className="w-full inline-flex items-center justify-center rounded-xl bg-primary text-primary-foreground h-11 px-4 py-2 text-sm font-semibold shadow-soft hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        {salvando ? "Salvando..." : "Salvar configurações"}
-      </button>
 
       <section className="surface-card p-4 sm:p-5 space-y-4">
         <div>
@@ -266,6 +232,40 @@ export function SettingsPage() {
           {limpando ? "Limpando..." : "Limpar todos os dados"}
         </button>
       </section>
+
+      <section className="surface-card p-4 sm:p-5 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">Dias que você trabalha</h2>
+          <p className="text-sm text-muted-foreground">Referência para sua rotina de cobrança.</p>
+        </div>
+        <div className="space-y-2">
+          {DIAS_SEMANA.map((dia: { valor: number; label: string }) => (
+            <label
+              key={dia.valor}
+              className="flex items-center gap-3 rounded-xl border bg-background/60 p-3 cursor-pointer hover:bg-accent transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={diasSelecionados.includes(dia.valor)}
+                onChange={() => toggleDia(dia.valor)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <span className="text-sm font-medium text-card-foreground">{dia.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          O cálculo de atraso considera apenas a data de vencimento.
+        </p>
+      </section>
+
+      <button
+        onClick={handleSalvar}
+        disabled={salvando || diasSelecionados.length === 0}
+        className="w-full inline-flex items-center justify-center rounded-xl bg-primary text-primary-foreground h-11 px-4 py-2 text-sm font-semibold shadow-soft hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {salvando ? "Salvando..." : "Salvar configurações"}
+      </button>
 
       {toastMsg && (
         <div className="fixed bottom-24 md:bottom-4 left-1/2 -translate-x-1/2 rounded-xl bg-card border px-4 py-2 text-sm text-card-foreground shadow-lg">
